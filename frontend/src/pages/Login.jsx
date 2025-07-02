@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
-import { supabase } from '../services/supabase'
+import apiService from '../services/api'
 
-function Login() {
+function Login({ onLoginSuccess }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -13,18 +13,46 @@ function Login() {
     setLoading(true)
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      console.log('Attempting login with backend API...')
+      
+      // Use backend API for login
+      const response = await fetch('http://localhost:8000/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email,
+          password,
+        }),
       })
 
-      if (error) throw error
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Login failed')
+      }
+
+      console.log('Login successful:', { 
+        hasToken: !!data.access_token,
+        tokenLength: data.access_token?.length,
+        userEmail: data.user?.email 
+      })
 
       // Store the access token for API calls
-      if (data.session) {
-        localStorage.setItem('access_token', data.session.access_token)
+      if (data.access_token) {
+        localStorage.setItem('access_token', data.access_token)
+        console.log('Token stored in localStorage')
+        
+        // Trigger auth check in parent component
+        if (onLoginSuccess) {
+          onLoginSuccess()
+        }
+      } else {
+        throw new Error('No access token received')
       }
     } catch (error) {
+      console.error('Login error:', error)
       setError(error.message)
     } finally {
       setLoading(false)

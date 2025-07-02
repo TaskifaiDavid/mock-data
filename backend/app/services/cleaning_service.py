@@ -16,7 +16,7 @@ class CleaningService:
     def __init__(self):
         self.db_service = DatabaseService()
         self.vendor_detector = VendorDetector()
-        self.data_cleaner = DataCleaner()
+        self.data_cleaner = DataCleaner(db_service=self.db_service)
         self.data_normalizer = DataNormalizer()
     
     async def process_file(self, upload_id: str, filename: str, file_contents: bytes, user_id: str):
@@ -40,7 +40,7 @@ class CleaningService:
             logger.info(f"Detected vendor: {vendor}")
             
             # Clean data
-            cleaned_df, transformations = await self.data_cleaner.clean_data(df, vendor)
+            cleaned_df, transformations = await self.data_cleaner.clean_data(df, vendor, filename)
             logger.info(f"Cleaned {len(cleaned_df)} rows (original: {len(df)})")
             logger.info(f"Transformations applied: {len(transformations)}")
             logger.info(f"Cleaned data columns: {list(cleaned_df.columns)}")

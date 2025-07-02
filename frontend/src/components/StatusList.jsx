@@ -1,46 +1,39 @@
 import React, { useState, useEffect } from 'react'
-import { supabase } from '../services/supabase'
 import StatusItem from './StatusItem'
+import api from '../services/api'
 
 function StatusList() {
   const [uploads, setUploads] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
     fetchUploads()
     
-    // Subscribe to real-time updates
-    const subscription = supabase
-      .channel('uploads')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'uploads' },
-        (payload) => {
-          fetchUploads()
-        }
-      )
-      .subscribe()
-
-    return () => {
-      subscription.unsubscribe()
-    }
+    // Poll for updates every 30 seconds
+    const interval = setInterval(fetchUploads, 30000)
+    
+    return () => clearInterval(interval)
   }, [])
 
   const fetchUploads = async () => {
     try {
-      const { data: session } = await supabase.auth.getSession()
-      if (!session?.session?.user) return
+      console.log('📥 Fetching user uploads...')
+      const token = localStorage.getItem('access_token')
+      
+      if (!token) {
+        console.log('❌ No token found')
+        setLoading(false)
+        return
+      }
 
-      const { data, error } = await supabase
-        .from('uploads')
-        .select('*')
-        .eq('user_id', session.session.user.id)
-        .order('uploaded_at', { ascending: false })
-
-      if (error) throw error
-      setUploads(data || [])
+      const uploadsData = await api.getUserUploads()
+      console.log('✅ Uploads fetched:', uploadsData)
+      setUploads(uploadsData || [])
+      setError(null)
     } catch (error) {
-      console.error('Error fetching uploads:', error)
+      console.error('❌ Error fetching uploads:', error)
+      setError(error.message)
     } finally {
       setLoading(false)
     }
@@ -53,6 +46,10 @@ function StatusList() {
   return (
     <div className="status-list">
       <h2>Processing Status</h2>
+      
+      {error && (
+        <div className="error">Error loading uploads: {error}</div>
+      )}
       
       {uploads.length === 0 ? (
         <p className="no-uploads">No uploads yet. Upload a file to get started!</p>

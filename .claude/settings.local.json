@@ -8,7 +8,10 @@
       "Bash(npm install)",
       "Bash(pip show:*)",
       "Bash(pip install:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "Bash(journalctl:*)",
+      "Bash(grep:*)",
+      "Bash(curl:*)"
     ],
     "deny": []
   }

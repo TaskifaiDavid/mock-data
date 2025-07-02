@@ -3,6 +3,7 @@ from app.utils.config import get_settings
 from app.utils.exceptions import AuthenticationException
 from app.models.auth import UserLogin, UserRegister, UserResponse, TokenResponse
 from typing import Optional
+import logging
 
 class AuthService:
     def __init__(self):
@@ -15,6 +16,7 @@ class AuthService:
             settings.supabase_url,
             settings.supabase_service_key
         )
+        self.logger = logging.getLogger(__name__)
     
     async def login(self, credentials: UserLogin) -> TokenResponse:
         try:
@@ -70,9 +72,35 @@ class AuthService:
     
     async def verify_token(self, token: str) -> Optional[dict]:
         try:
-            response = self.supabase.auth.get_user(token)
-            return response.user.model_dump() if response.user else None
-        except Exception:
+            self.logger.info(f"Attempting token verification for token starting with: {token[:20]}...")
+            
+            if not token:
+                self.logger.warning("Empty token provided for verification")
+                return None
+            
+            # Remove 'Bearer ' prefix if present
+            if token.startswith('Bearer '):
+                token = token[7:]
+                self.logger.debug("Removed Bearer prefix from token")
+            
+            # Use admin/service client for token validation as it has proper permissions
+            self.logger.debug("Using admin client for token validation")
+            response = self.admin_supabase.auth.get_user(token)
+            
+            if response.user:
+                self.logger.info(f"Token verification successful for user: {response.user.email}")
+                return response.user.model_dump()
+            else:
+                self.logger.warning("Token verification failed - no user returned")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Token verification error: {str(e)}")
+            self.logger.error(f"Token type: {type(token)}")
+            self.logger.error(f"Token length: {len(token) if token else 'None'}")
+            if hasattr(e, 'response'):
+                self.logger.error(f"Response status: {getattr(e.response, 'status_code', 'Unknown')}")
+                self.logger.error(f"Response text: {getattr(e.response, 'text', 'Unknown')}")
             return None
     
     async def logout(self, token: str) -> bool:

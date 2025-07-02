@@ -18,7 +18,7 @@ class VendorDetector:
         elif "cdlc" in filename_lower:
             return "cdlc"
         elif "continuity" in filename_lower:
-            return "continuity"
+            return "liberty"
         elif "bibbi sales" in filename_lower:
             return "ukraine"
         
@@ -73,6 +73,12 @@ class VendorDetector:
                 "currency": "UAH",
                 "header_row": 0,
                 "pivot_format": True,
+                "date_columns": []
+            },
+            "liberty": {
+                "currency": "GBP",
+                "header_row": 0,
+                "pivot_format": False,
                 "date_columns": []
             }
         }

@@ -1,14 +1,17 @@
 import React, { useState } from 'react'
-import { supabase } from '../services/supabase'
 import Upload from '../components/Upload'
 import StatusList from '../components/StatusList'
 
-function Dashboard({ session }) {
+function Dashboard({ user, onLogout }) {
   const [activeView, setActiveView] = useState('upload')
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    localStorage.removeItem('access_token')
+  console.log('Dashboard rendered with user:', user)
+
+  const handleLogout = () => {
+    console.log('Logout clicked')
+    if (onLogout) {
+      onLogout()
+    }
   }
 
   return (
@@ -16,7 +19,7 @@ function Dashboard({ session }) {
       <header className="dashboard-header">
         <h1>Data Cleaning Pipeline</h1>
         <div className="user-info">
-          <span>{session.user.email}</span>
+          <span>{user?.email || 'Unknown User'}</span>
           <button onClick={handleLogout} className="logout-btn">
             Logout
           </button>
