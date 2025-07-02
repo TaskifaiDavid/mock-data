@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(mkdir:*)",
+      "Bash(python:*)",
+      "Bash(npm install)",
+      "Bash(pip show:*)",
+      "Bash(pip install:*)",
+      "Bash(pkill:*)"
+    ],
+    "deny": []
+  }
+}
