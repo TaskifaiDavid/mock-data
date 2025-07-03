@@ -68,6 +68,51 @@ class DataCleaner:
     async def _clean_boxnox_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
         transformations = []
         
+        # Extract target month and year from filename
+        target_year, target_month = self._extract_boxnox_date_from_filename()
+        
+        print(f"DEBUG: BOXNOX filtering for Year: {target_year}, Month: {target_month}")
+        print(f"DEBUG: Original DataFrame shape: {df.shape}")
+        print(f"DEBUG: DataFrame columns: {list(df.columns)}")
+        print(f"DEBUG: DataFrame dtypes: {df.dtypes.to_dict()}")
+        if len(df) > 0:
+            print(f"DEBUG: First 3 rows: {df.head(3).to_dict('records')}")
+        
+        # Check if required columns exist
+        required_columns = ['YEAR', 'MONTH']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            print(f"ERROR: Missing required columns: {missing_columns}")
+            print(f"ERROR: Available columns: {list(df.columns)}")
+            # Return original dataframe without filtering if required columns are missing
+            transformations.append({
+                "row_index": 0,
+                "column_name": "filter_skip",
+                "original_value": f"Missing columns: {missing_columns}",
+                "cleaned_value": f"Skipped filtering due to missing columns: {missing_columns}",
+                "transformation_type": "no_filtering_missing_columns"
+            })
+            df_filtered = df.copy()
+        else:
+            # Filter data to only include rows matching the target month and year
+            initial_rows = len(df)
+            df_filtered = df[
+                (df['YEAR'] == target_year) & 
+                (df['MONTH'] == target_month)
+            ].copy()
+            
+            final_rows = len(df_filtered)
+            print(f"DEBUG: After filtering - kept {final_rows} rows out of {initial_rows}")
+            
+            transformations.append({
+                "row_index": 0,
+                "column_name": "date_filter",
+                "original_value": f"All rows: {initial_rows}",
+                "cleaned_value": f"Filtered to Year {target_year}, Month {target_month}: {final_rows} rows",
+                "transformation_type": "month_year_filtering"
+            })
+        
         # Column mapping for Boxnox
         column_mapping = {
             'YEAR': 'report_year',
@@ -81,9 +126,9 @@ class DataCleaner:
         }
         
         # Rename columns
-        df.rename(columns=column_mapping, inplace=True)
+        df_filtered.rename(columns=column_mapping, inplace=True)
         
-        return df, transformations
+        return df_filtered, transformations
     
     async def _clean_skins_sa_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
         transformations = []
@@ -716,6 +761,37 @@ class DataCleaner:
         
         print("DEBUG: No ReportPeriod date pattern found, using defaults")
         return 2025, 1  # Default if parsing fails
+    
+    def _parse_month_name(self, month_name: str) -> int:
+        """Convert month name to number (e.g., 'APR' -> 4)"""
+        month_mapping = {
+            'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+            'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12
+        }
+        return month_mapping.get(month_name.upper(), 1)
+    
+    def _extract_boxnox_date_from_filename(self) -> Tuple[int, int]:
+        """Extract year and month from BOXNOX filename APR2025 format"""
+        if not self.current_filename:
+            return 2025, 4  # Default values
+        
+        print(f"DEBUG: Extracting date from BOXNOX filename: '{self.current_filename}'")
+        
+        # Pattern for month names followed by year
+        # Example: "BOXNOX - BIBBI Monthly Sales Report APR2025"
+        date_pattern = r'([A-Z]{3})(\d{4})'
+        match = re.search(date_pattern, self.current_filename.upper())
+        
+        if match:
+            month_str = match.group(1)
+            year = int(match.group(2))
+            month = self._parse_month_name(month_str)
+            
+            print(f"DEBUG: Parsed BOXNOX date - Month: {month_str} ({month}), Year: {year}")
+            return year, month
+        
+        print("DEBUG: No BOXNOX date pattern found, using defaults")
+        return 2025, 4  # Default if parsing fails
     
     async def _clean_ukraine_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
         transformations = []

@@ -55,9 +55,6 @@ class DataNormalizer:
             'article': 'functional_name',
             'functional_name': 'functional_name',  # Direct mapping for Liberty
             
-            # SKU mappings for creating product_ean when missing
-            'sku': 'sku_temp',
-            
             # Currency
             'currency': 'currency'
         }
@@ -66,6 +63,15 @@ class DataNormalizer:
         for source_col, target_col in column_mapping.items():
             if source_col in df.columns:
                 normalized_df[target_col] = df[source_col]
+        
+        # Special handling for SKU column based on vendor
+        if 'sku' in df.columns:
+            if vendor == 'boxnox':
+                # For Boxnox, map SKU to functional_name
+                normalized_df['functional_name'] = df['sku']
+            else:
+                # For other vendors, keep SKU as sku_temp for EAN fallback
+                normalized_df['sku_temp'] = df['sku']
         
         # Special handling for sales_lc - preserve raw value from local currency
         if vendor in ['liberty', 'skins_nl'] and 'sales_lc' in df.columns:
@@ -142,6 +148,10 @@ class DataNormalizer:
                 # For Liberty, only strip whitespace but preserve case (uppercase set in cleaner)
                 normalized_df['functional_name'] = normalized_df['functional_name'].str.strip()
                 print("DEBUG: Preserved functional_name case for Liberty data (no title case conversion)")
+            elif vendor == 'boxnox':
+                # For Boxnox, convert SKU to uppercase
+                normalized_df['functional_name'] = normalized_df['functional_name'].str.strip().str.upper()
+                print("DEBUG: Converted functional_name to uppercase for Boxnox SKU data")
             else:
                 # For other vendors, apply title case as before
                 normalized_df['functional_name'] = normalized_df['functional_name'].str.strip().str.title()

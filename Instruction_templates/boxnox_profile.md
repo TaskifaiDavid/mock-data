@@ -12,13 +12,13 @@ This is an example of how to fill out the reseller template using BOXNOX data.
 
 ### Filename Patterns
 - **Primary Pattern:** Contains "boxnox" in filename (case insensitive)
-- **Secondary Pattern:** Contains "sell out by ean" in sheet names
+- **Secondary Pattern:** Contains "SELL OUT BY EAN" in sheet names
 - **Example Filenames:** 
-  - boxnox_sales_report_2025.xlsx
-  - BOXNOX_sellout_data.xlsx
+  - BOXNOX - BIBBI Monthly Sales Report APR2025
+  - BOXNOX - BIBBI Monthly Sales Report JAN2025
 
 ### Sheet/Content Patterns
-- **Sheet Names:** "Sell Out By EAN", "Sales Data"
+- **Sheet Names:** "SELL OUT BY EAN", "Sales Data"
 - **Content Identifiers:** Column headers include "EAN", "QTY", "AMOUNT"
 - **File Format:** Excel
 
@@ -27,14 +27,14 @@ This is an example of how to fill out the reseller template using BOXNOX data.
 ### File Structure
 - **Header Row:** 0 (first row contains headers)
 - **Data Starts:** 1 (second row)
-- **Skip Rows:** None
+- **Skip Rows:** Skip rows that is not for current month.
 - **Pivot Format:** No (flat table format)
 
 ### Column Mappings
 
 | Database Field | Source Column | Position/Name | Notes |
 |---------------|---------------|---------------|-------|
-| reseller | Fixed Value | - | Always "BOXNOX" |
+| reseller | Fixed Value | - | Always "Boxnox" |
 | product_ean | Direct Column | "EAN" | EAN provided directly |
 | month | Direct Column | "MONTH" | Month number (1-12) |
 | year | Direct Column | "YEAR" | Year (YYYY) |
@@ -45,7 +45,7 @@ This is an example of how to fill out the reseller template using BOXNOX data.
 
 ### Special Processing Rules
 - **Date Extraction:** Month and year provided in separate columns
-- **Data Filtering:** No special filtering needed
+- **Data Filtering:** If the report is for APR2025 - it should only look for MONTH:4 YEAR:2025
 - **Duplicate Handling:** No duplicates expected
 - **Value Conversions:** Numbers may need string-to-numeric conversion
 - **Product Matching:** EAN provided directly, no lookup needed
@@ -54,17 +54,17 @@ This is an example of how to fill out the reseller template using BOXNOX data.
 
 ### Date Rules
 - **Report Period:** Monthly sales data
-- **Date Calculation:** None needed, month/year in data
-- **Filename Date Format:** Not used for date extraction
+- **Date Calculation:** None needed, month/year in filename
+- **Filename Date Format:** APR2025 = APRIL 2025 = MONTH:4 YEAR:2025
 
 ### Data Quality Rules
-- **Required Fields:** EAN, QTY, AMOUNT, MONTH, YEAR
+- **Required Fields:** EAN, QTY, AMOUNT, MONTH, YEAR, SKU
 - **Zero Values:** Include zero quantities if amount > 0
 - **Negative Values:** Include (returns/refunds)
 - **Missing Data:** Skip rows with missing EAN
 
 ### Processing Notes
-- **File Size:** Typically 1000-5000 rows
+- **File Size:** Typically 150-400
 - **Frequency:** Monthly
 - **Special Considerations:** Clean, structured data with minimal processing needed
 
@@ -72,28 +72,28 @@ This is an example of how to fill out the reseller template using BOXNOX data.
 
 ### Example Filename
 ```
-boxnox_sellout_march_2025.xlsx
+BOXNOX - BIBBI Monthly Sales Report APR2025
 ```
 
 ### Example Data Structure
 ```
-Row 1: YEAR | MONTH | CHANNEL | POS | EAN | QTY | AMOUNT | SKU
-Row 2: 2025 | 3 | Retail | Store1 | 1234567890123 | 10 | 150.00 | SKU001
-Row 3: 2025 | 3 | Online | Web | 1234567890124 | 5 | 75.50 | SKU002
+Row 1: YEAR | MONTH | CHANNEL | POS | EAN | QTY | AMOUNT | DESCRIPTION | SKU
+Row 2: 2024 | 1 | Retail | Abanuc Online | 7350154320008 | 1 | 202,48 | EDP SOAP CLUB | BBSC100
+Row 3: 2024 | 1 | Retail | Abanuc Online | 7350154320022 | 1 | 202,48 | EDP GHOST OF TOM  | BBGOT100
 ```
 
 ### Expected Output
 After processing, data should map to:
 ```json
 {
-  "reseller": "BOXNOX",
-  "product_ean": "1234567890123",
-  "month": 3,
-  "year": 2025,
-  "quantity": 10,
-  "sales_lc": "150.00",
+  "reseller": "Boxnox",
+  "product_ean": "7350154320008",
+  "month": 1,
+  "year": 2024,
+  "quantity": 1,
+  "sales_lc": "202,48",
   "currency": "EUR",
-  "functional_name": "SKU001"
+  "functional_name": "BBSC100"
 }
 ```
 

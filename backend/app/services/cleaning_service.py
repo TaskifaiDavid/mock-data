@@ -33,13 +33,22 @@ class CleaningService:
             excel_file = pd.ExcelFile(io.BytesIO(file_contents))
             logger.info(f"Excel file sheet names: {excel_file.sheet_names}")
             
-            # Read the first sheet (or try to find the right sheet)
+            # First, detect vendor from filename to determine correct sheet
+            vendor = self.vendor_detector.detect_vendor(filename, pd.DataFrame())
+            logger.info(f"Detected vendor from filename: {vendor}")
+            
+            # Select appropriate sheet based on vendor
             sheet_name = excel_file.sheet_names[0]  # Default to first sheet
             
             # For Skins NL, try to find SalesPerSKU sheet if available
-            if any("salespersku" in name.lower() for name in excel_file.sheet_names):
+            if vendor == "skins_nl" and any("salespersku" in name.lower() for name in excel_file.sheet_names):
                 sheet_name = next(name for name in excel_file.sheet_names if "salespersku" in name.lower())
-                logger.info(f"Found SalesPerSKU sheet: {sheet_name}")
+                logger.info(f"Found SalesPerSKU sheet for Skins NL: {sheet_name}")
+            
+            # For BOXNOX, try to find "SELL OUT BY EAN" sheet if available
+            elif vendor == "boxnox" and any("sell out by ean" in name.lower() for name in excel_file.sheet_names):
+                sheet_name = next(name for name in excel_file.sheet_names if "sell out by ean" in name.lower())
+                logger.info(f"Found 'SELL OUT BY EAN' sheet for BOXNOX: {sheet_name}")
             
             df = pd.read_excel(excel_file, sheet_name=sheet_name)
             logger.info(f"Loaded Excel sheet '{sheet_name}' with {len(df)} rows, columns: {list(df.columns)}")
@@ -56,9 +65,8 @@ class CleaningService:
                 # Show last few rows to see if data extends to end of file
                 logger.info(f"Last 3 rows preview: {df.tail(3).to_dict('records')}")
             
-            # Detect vendor
-            vendor = self.vendor_detector.detect_vendor(filename, df)
-            logger.info(f"Detected vendor: {vendor}")
+            # Vendor already detected above
+            logger.info(f"Using vendor: {vendor}")
             
             # Clean data
             cleaned_df, transformations = await self.data_cleaner.clean_data(df, vendor, filename)
