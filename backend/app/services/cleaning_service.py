@@ -29,11 +29,32 @@ class CleaningService:
             await self.db_service.update_upload_status(upload_id, UploadStatus.PROCESSING)
             logger.info(f"Updated upload {upload_id} status to PROCESSING")
             
-            # Read Excel file
-            df = pd.read_excel(io.BytesIO(file_contents))
-            logger.info(f"Loaded Excel file with {len(df)} rows, columns: {list(df.columns)}")
+            # Read Excel file with better debugging
+            excel_file = pd.ExcelFile(io.BytesIO(file_contents))
+            logger.info(f"Excel file sheet names: {excel_file.sheet_names}")
+            
+            # Read the first sheet (or try to find the right sheet)
+            sheet_name = excel_file.sheet_names[0]  # Default to first sheet
+            
+            # For Skins NL, try to find SalesPerSKU sheet if available
+            if any("salespersku" in name.lower() for name in excel_file.sheet_names):
+                sheet_name = next(name for name in excel_file.sheet_names if "salespersku" in name.lower())
+                logger.info(f"Found SalesPerSKU sheet: {sheet_name}")
+            
+            df = pd.read_excel(excel_file, sheet_name=sheet_name)
+            logger.info(f"Loaded Excel sheet '{sheet_name}' with {len(df)} rows, columns: {list(df.columns)}")
             logger.info(f"First 3 rows preview: {df.head(3).to_dict('records')}")
             logger.info(f"Data types: {df.dtypes.to_dict()}")
+            
+            # Debug: Count non-empty rows for each column to understand data distribution
+            if len(df) > 0:
+                logger.info("Column data distribution:")
+                for col in df.columns:
+                    non_empty = df[col].notna().sum()
+                    logger.info(f"  {col}: {non_empty}/{len(df)} non-empty values")
+                    
+                # Show last few rows to see if data extends to end of file
+                logger.info(f"Last 3 rows preview: {df.tail(3).to_dict('records')}")
             
             # Detect vendor
             vendor = self.vendor_detector.detect_vendor(filename, df)

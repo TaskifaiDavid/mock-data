@@ -93,6 +93,52 @@ class ApiService {
     return response.json()
   }
 
+  async uploadMultipleFiles(files) {
+    const token = localStorage.getItem('access_token')
+    console.log('Upload Multiple Files:', {
+      fileCount: files.length,
+      fileNames: files.map(f => f.name),
+      hasToken: !!token
+    })
+    
+    const formData = new FormData()
+    files.forEach(file => {
+      formData.append('files', file)
+    })
+
+    const response = await fetch(`${API_URL}/api/upload/multiple`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: formData,
+    })
+
+    if (!response.ok) {
+      console.error('Multiple Upload Error:', {
+        status: response.status,
+        statusText: response.statusText
+      })
+      
+      if (response.status === 401) {
+        console.warn('Upload authentication failed - clearing token')
+        localStorage.removeItem('access_token')
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login'
+        }
+      }
+      
+      try {
+        const error = await response.json()
+        throw new Error(error.error || 'Multiple upload failed')
+      } catch (parseError) {
+        throw new Error(`Multiple upload failed with status ${response.status}`)
+      }
+    }
+
+    return response.json()
+  }
+
   async getStatus(uploadId) {
     return this.request(`/api/status/${uploadId}`)
   }

@@ -26,6 +26,8 @@ class DataCleaner:
             df_clean, trans = await self._clean_boxnox_data(df_clean)
         elif vendor == "skins_sa":
             df_clean, trans = await self._clean_skins_sa_data(df_clean)
+        elif vendor == "skins_nl":
+            df_clean, trans = await self._clean_skins_nl_data(df_clean)
         elif vendor == "cdlc":
             df_clean, trans = await self._clean_cdlc_data(df_clean)
         elif vendor == "continuity":
@@ -99,6 +101,144 @@ class DataCleaner:
         }
         
         df.rename(columns=column_mapping, inplace=True)
+        
+        return df, transformations
+    
+    async def _clean_skins_nl_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
+        transformations = []
+        
+        # Extract year and month from filename
+        year, month = self._extract_skins_nl_date_from_filename()
+        
+        # Debug: Log available columns
+        print(f"DEBUG: Available columns in Skins NL file: {list(df.columns)}")
+        
+        # Column mapping for Skins NL with fallback options
+        column_mapping = {}
+        
+        # Check for EAN column variations
+        ean_columns = ['EANCode', 'EAN', 'ean', 'EAN Code', 'EAN_Code']
+        for col in ean_columns:
+            if col in df.columns:
+                column_mapping[col] = 'ean'
+                print(f"DEBUG: Found EAN column: {col}")
+                break
+        
+        # Check for quantity column variations
+        quantity_columns = ['SalesQuantity', 'Sales Quantity', 'Quantity', 'quantity', 'Qty', 'Sales_Quantity']
+        for col in quantity_columns:
+            if col in df.columns:
+                column_mapping[col] = 'quantity'
+                print(f"DEBUG: Found quantity column: {col}")
+                break
+        
+        # Check for sales amount column variations
+        sales_columns = ['SalesAmount', 'Sales Amount', 'Amount', 'Sales_Amount', 'sales_amount']
+        for col in sales_columns:
+            if col in df.columns:
+                column_mapping[col] = 'sales_lc'
+                print(f"DEBUG: Found sales amount column: {col}")
+                break
+        
+        print(f"DEBUG: Column mapping for Skins NL: {column_mapping}")
+        
+        # Rename columns that were found
+        if column_mapping:
+            df.rename(columns=column_mapping, inplace=True)
+            print(f"DEBUG: Columns after mapping: {list(df.columns)}")
+        else:
+            print("ERROR: No matching columns found for Skins NL data")
+            return df, transformations
+        
+        # Clean EUR currency values - remove € symbol and convert to numeric
+        if 'sales_lc' in df.columns:
+            for idx, value in df['sales_lc'].items():
+                if pd.notna(value) and value != '':
+                    # Remove € symbol and convert to numeric
+                    clean_value = str(value).replace('€', '').replace(',', '').strip()
+                    if clean_value:
+                        try:
+                            numeric_value = float(clean_value)
+                            df.at[idx, 'sales_lc'] = str(numeric_value)
+                            transformations.append({
+                                "row_index": idx,
+                                "column_name": "sales_lc",
+                                "original_value": value,
+                                "cleaned_value": str(numeric_value),
+                                "transformation_type": "currency_cleaning"
+                            })
+                        except ValueError:
+                            # If conversion fails, keep original value
+                            pass
+        
+        # Add year and month columns
+        df['report_year'] = year
+        df['report_month'] = month
+        
+        # Add reseller and currency
+        df['reseller'] = 'Skins NL'
+        df['currency'] = 'EUR'
+        
+        # Add empty functional_name (not available in Skins NL data)
+        df['functional_name'] = ''
+        
+        # Filter rows more carefully - only remove if quantity is truly missing/invalid
+        if 'quantity' in df.columns:
+            print(f"DEBUG: Filtering rows with missing/invalid quantity. Rows before: {len(df)}")
+            
+            # Count different types of quantity values
+            total_rows = len(df)
+            quantity_notna = df['quantity'].notna().sum()
+            quantity_empty_string = (df['quantity'] == '').sum()
+            quantity_zero = (df['quantity'] == '0').sum()
+            quantity_zero_numeric = (pd.to_numeric(df['quantity'], errors='coerce') == 0).sum()
+            
+            print(f"DEBUG: Quantity analysis - Total: {total_rows}, NotNA: {quantity_notna}, Empty string: {quantity_empty_string}, Zero string: {quantity_zero}, Zero numeric: {quantity_zero_numeric}")
+            
+            # Show some sample quantity values to understand the data
+            print(f"DEBUG: Sample quantity values: {df['quantity'].head(10).tolist()}")
+            
+            # More lenient filtering - only remove if quantity is null, empty string, or cannot be converted to positive number
+            def is_valid_quantity(val):
+                if pd.isna(val):
+                    return False
+                if val == '' or val == ' ':
+                    return False
+                try:
+                    num_val = float(str(val).strip())
+                    return num_val > 0  # Allow positive quantities only
+                except (ValueError, TypeError):
+                    return False
+            
+            valid_mask = df['quantity'].apply(is_valid_quantity)
+            df = df[valid_mask]
+            
+            print(f"DEBUG: Rows after filtering invalid quantity: {len(df)}")
+            
+            # Log some examples of what was filtered out if significant data loss
+            if len(df) < total_rows * 0.5:  # If we lost more than 50% of rows
+                print("WARNING: Significant data loss during quantity filtering!")
+                invalid_quantities = df[~valid_mask]['quantity'].value_counts()
+                print(f"DEBUG: Most common invalid quantity values: {invalid_quantities.head()}")
+        else:
+            print("WARNING: No quantity column found after mapping, skipping quantity filtering")
+        
+        # Log transformations for date fields
+        transformations.append({
+            "row_index": 0,
+            "column_name": "report_year",
+            "original_value": None,
+            "cleaned_value": year,
+            "transformation_type": "filename_date_extraction"
+        })
+        
+        transformations.append({
+            "row_index": 0,
+            "column_name": "report_month",
+            "original_value": None,
+            "cleaned_value": month,
+            "transformation_type": "filename_date_extraction"
+        })
         
         return df, transformations
     
@@ -221,57 +361,101 @@ class DataCleaner:
                     print(f"ROW {idx} - Quantity: {quantity}, Sales: {sales_lc}, Column F: '{raw_functional_name}', Parsed: '{functional_name}', Is_Total: {is_total_row}")
                 
                 # Only include rows with valid quantity and sales data, excluding total rows
-                # Include products with zero sales for completeness
+                # Include products with zero/negative quantities if they have sales_lc values (returns, refunds, adjustments)
                 if not is_total_row and pd.notna(quantity) and pd.notna(sales_lc):
-                    # If functional_name is nan, check the next row for the product string
-                    final_functional_name = functional_name
+                    # Convert to numeric for comparison, handling string values like "0.00", "-10.50"
+                    try:
+                        # Handle quantity conversion
+                        if pd.notna(quantity):
+                            if isinstance(quantity, str):
+                                quantity_clean = quantity.strip().replace(',', '')
+                                numeric_quantity = float(quantity_clean) if quantity_clean else 0
+                            else:
+                                numeric_quantity = float(quantity)
+                        else:
+                            numeric_quantity = 0
+                            
+                        # Handle sales_lc conversion  
+                        if pd.notna(sales_lc):
+                            if isinstance(sales_lc, str):
+                                sales_lc_clean = sales_lc.strip().replace(',', '').replace('$', '').replace('£', '')
+                                numeric_sales_lc = float(sales_lc_clean) if sales_lc_clean else 0
+                            else:
+                                numeric_sales_lc = float(sales_lc)
+                        else:
+                            numeric_sales_lc = 0
+                            
+                    except (ValueError, TypeError) as e:
+                        print(f"DEBUG: Error converting values to numeric - quantity: '{quantity}', sales_lc: '{sales_lc}', error: {e}")
+                        numeric_quantity = 0
+                        numeric_sales_lc = 0
                     
-                    if pd.isna(functional_name):
-                        print(f"DEBUG: Row {idx} has NULL functional_name, trying fallbacks...")
-                        
-                        # Try next row
-                        if idx + 1 < len(df):
-                            next_row = df.iloc[idx + 1]
-                            next_functional_name = next_row.iloc[5] if len(next_row) > 5 else None  # Column F
-                            next_quantity = next_row.iloc[20] if len(next_row) > 20 else None
-                            next_sales_lc = next_row.iloc[21] if len(next_row) > 21 else None
-                            
-                            print(f"DEBUG: Next row {idx+1} - F: '{next_functional_name}', Qty: {next_quantity}, Sales: {next_sales_lc}")
-                            
-                            # If next row has same sales data and a valid functional_name, use it
-                            if (pd.notna(next_functional_name) and 
-                                next_quantity == quantity and 
-                                next_sales_lc == sales_lc):
-                                final_functional_name = str(next_functional_name).strip()
-                                print(f"DEBUG: ✓ Found functional_name in next row {idx+1}: '{final_functional_name}'")
-                        
-                        # Try previous row if next row didn't work
-                        if pd.isna(final_functional_name) and idx > 0:
-                            prev_row = df.iloc[idx - 1]
-                            prev_functional_name = prev_row.iloc[5] if len(prev_row) > 5 else None  # Column F
-                            print(f"DEBUG: Previous row {idx-1} - F: '{prev_functional_name}'")
-                            
-                            if pd.notna(prev_functional_name):
-                                final_functional_name = str(prev_functional_name).strip()
-                                print(f"DEBUG: ✓ Using previous row functional_name: '{final_functional_name}'")
-                        
-                        # Fallback to Column E if still no functional_name
-                        if pd.isna(final_functional_name):
-                            item_id = row.iloc[4] if len(row) > 4 else None  # Column E
-                            print(f"DEBUG: Column E fallback: '{item_id}'")
-                            if pd.notna(item_id):
-                                final_functional_name = str(item_id).strip()
-                                print(f"DEBUG: ✓ Using Column E as fallback: '{final_functional_name}'")
-                        
-                        if pd.isna(final_functional_name):
-                            print(f"DEBUG: ✗ No functional_name found for row {idx} after all fallbacks")
+                    # Include if quantity is non-zero OR if quantity is zero/negative but has non-zero sales value
+                    include_row = numeric_quantity != 0 or (numeric_quantity == 0 and numeric_sales_lc != 0)
                     
-                    liberty_data.append({
-                        'quantity': quantity,
-                        'sales_lc': sales_lc,
-                        'functional_name': final_functional_name,
-                        'original_row': idx
-                    })
+                    # Debug logging for zero quantity row decisions
+                    if numeric_quantity == 0:
+                        if numeric_sales_lc != 0:
+                            print(f"DEBUG: Including zero quantity row {idx} - qty: {quantity} ({numeric_quantity}), sales: {sales_lc} ({numeric_sales_lc}) - HAS SALES VALUE")
+                        else:
+                            print(f"DEBUG: Excluding zero quantity row {idx} - qty: {quantity} ({numeric_quantity}), sales: {sales_lc} ({numeric_sales_lc}) - NO SALES VALUE")
+                    elif numeric_quantity < 0:
+                        if numeric_sales_lc != 0:
+                            print(f"DEBUG: Including negative quantity row {idx} - qty: {quantity} ({numeric_quantity}), sales: {sales_lc} ({numeric_sales_lc}) - HAS SALES VALUE")
+                        else:
+                            print(f"DEBUG: Excluding negative quantity row {idx} - qty: {quantity} ({numeric_quantity}), sales: {sales_lc} ({numeric_sales_lc}) - NO SALES VALUE")
+                    
+                    if include_row:
+                        # If functional_name is nan, check the next row for the product string
+                        final_functional_name = functional_name
+                        
+                        if pd.isna(functional_name):
+                            print(f"DEBUG: Row {idx} has NULL functional_name, trying fallbacks...")
+                            
+                            # Try next row
+                            if idx + 1 < len(df):
+                                next_row = df.iloc[idx + 1]
+                                next_functional_name = next_row.iloc[5] if len(next_row) > 5 else None  # Column F
+                                next_quantity = next_row.iloc[20] if len(next_row) > 20 else None
+                                next_sales_lc = next_row.iloc[21] if len(next_row) > 21 else None
+                                
+                                print(f"DEBUG: Next row {idx+1} - F: '{next_functional_name}', Qty: {next_quantity}, Sales: {next_sales_lc}")
+                                
+                                # If next row has same sales data and a valid functional_name, use it
+                                if (pd.notna(next_functional_name) and 
+                                    next_quantity == quantity and 
+                                    next_sales_lc == sales_lc):
+                                    final_functional_name = str(next_functional_name).strip()
+                                    print(f"DEBUG: ✓ Found functional_name in next row {idx+1}: '{final_functional_name}'")
+                            
+                            # Try previous row if next row didn't work
+                            if pd.isna(final_functional_name) and idx > 0:
+                                prev_row = df.iloc[idx - 1]
+                                prev_functional_name = prev_row.iloc[5] if len(prev_row) > 5 else None  # Column F
+                                print(f"DEBUG: Previous row {idx-1} - F: '{prev_functional_name}'")
+                                
+                                if pd.notna(prev_functional_name):
+                                    final_functional_name = str(prev_functional_name).strip()
+                                    print(f"DEBUG: ✓ Using previous row functional_name: '{final_functional_name}'")
+                            
+                            # Fallback to Column E if still no functional_name
+                            if pd.isna(final_functional_name):
+                                item_id = row.iloc[4] if len(row) > 4 else None  # Column E
+                                print(f"DEBUG: Column E fallback: '{item_id}'")
+                                if pd.notna(item_id):
+                                    final_functional_name = str(item_id).strip()
+                                    print(f"DEBUG: ✓ Using Column E as fallback: '{final_functional_name}'")
+                            
+                            if pd.isna(final_functional_name):
+                                print(f"DEBUG: ✗ No functional_name found for row {idx} after all fallbacks")
+                        
+                        
+                        liberty_data.append({
+                            'quantity': quantity,
+                            'sales_lc': sales_lc,
+                            'functional_name': final_functional_name,
+                            'original_row': idx
+                        })
         
         # Handle duplicate rows - only remove true consecutive pair duplicates
         # Sort by original row index to maintain order
@@ -472,13 +656,17 @@ class DataCleaner:
             return pd.DataFrame(), transformations
     
     def _extract_liberty_date_from_filename(self) -> Tuple[int, int]:
-        """Extract year and month from Liberty filename with -1 week logic"""
+        """Extract year and month from Liberty filename DD-MM-YYYY format"""
         if not self.current_filename:
             return 2025, 5  # Default values
         
-        # Example filename: "Continuity Supplier Size Report 01_06_2025.xlsx"
-        # Extract date pattern DD_MM_YYYY
-        date_pattern = r'(\d{2})_(\d{2})_(\d{4})'
+        print(f"DEBUG: Extracting date from filename: '{self.current_filename}'")
+        
+        # Support both formats: DD-MM-YYYY and DD_MM_YYYY
+        # Example filenames: 
+        # "Continuity Supplier Size Report 11-04-2025.xlsx" 
+        # "Continuity Supplier Size Report 01_06_2025.xlsx"
+        date_pattern = r'(\d{2})[-_](\d{2})[-_](\d{4})'
         match = re.search(date_pattern, self.current_filename)
         
         if match:
@@ -486,13 +674,48 @@ class DataCleaner:
             month = int(match.group(2))
             year = int(match.group(3))
             
-            # Create date and subtract 1 week
-            file_date = datetime(year, month, day)
-            report_date = file_date - timedelta(weeks=1)
+            print(f"DEBUG: Parsed date - Day: {day}, Month: {month}, Year: {year}")
             
-            return report_date.year, report_date.month
+            # Validate month is 1-12
+            if month < 1 or month > 12:
+                print(f"ERROR: Invalid month {month}, using defaults")
+                return 2025, 5
+            
+            # Return month and year directly (no date arithmetic needed)
+            print(f"DEBUG: Final date - Month: {month}, Year: {year}")
+            return year, month
         
+        print("DEBUG: No date pattern found, using defaults")
         return 2025, 5  # Default if parsing fails
+    
+    def _extract_skins_nl_date_from_filename(self) -> Tuple[int, int]:
+        """Extract year and month from Skins NL filename ReportPeriodMM-YYYY format"""
+        if not self.current_filename:
+            return 2025, 1  # Default values
+        
+        print(f"DEBUG: Extracting date from Skins NL filename: '{self.current_filename}'")
+        
+        # Pattern: ReportPeriod02-2025
+        # Example: BIBBIPARFU_ReportPeriod02-2025.xlsx
+        date_pattern = r'ReportPeriod(\d{2})-(\d{4})'
+        match = re.search(date_pattern, self.current_filename)
+        
+        if match:
+            month = int(match.group(1))
+            year = int(match.group(2))
+            
+            print(f"DEBUG: Parsed Skins NL date - Month: {month}, Year: {year}")
+            
+            # Validate month is 1-12
+            if month < 1 or month > 12:
+                print(f"ERROR: Invalid month {month}, using defaults")
+                return 2025, 1
+            
+            print(f"DEBUG: Final Skins NL date - Month: {month}, Year: {year}")
+            return year, month
+        
+        print("DEBUG: No ReportPeriod date pattern found, using defaults")
+        return 2025, 1  # Default if parsing fails
     
     async def _clean_ukraine_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
         transformations = []
@@ -536,11 +759,23 @@ class DataCleaner:
         if 'product_name' in df.columns:
             df['product_name'] = df['product_name'].str.strip().str.title()
         
-        # Remove rows with zero or null quantities
+        # Remove rows with zero or null quantities (but preserve for some vendors)
         if 'quantity' in df.columns:
+            print(f"DEBUG: Common cleaning - quantity filtering. Rows before: {len(df)}")
             # Convert to numeric first to handle string values safely
             df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce')
-            # Remove rows with zero, negative, or non-numeric quantities
-            df = df[df['quantity'] > 0]
+            
+            # For most vendors, remove zero/negative quantities
+            # But this filtering is now handled in vendor-specific cleaning and normalization
+            # So we'll just convert to numeric here and let other stages handle filtering
+            print(f"DEBUG: Common cleaning - converted quantity to numeric. Rows after: {len(df)}")
+            
+            # Only remove truly invalid (NaN) quantities that couldn't be converted
+            initial_count = len(df)
+            df = df[df['quantity'].notna()]
+            filtered_count = len(df)
+            
+            if filtered_count < initial_count:
+                print(f"DEBUG: Common cleaning - removed {initial_count - filtered_count} rows with non-numeric quantities")
         
         return df, transformations

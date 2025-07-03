@@ -2,20 +2,37 @@ import React, { useState, useRef } from 'react'
 import api from '../services/api'
 
 function Upload() {
-  const [file, setFile] = useState(null)
+  const [files, setFiles] = useState([])
   const [uploading, setUploading] = useState(false)
-  const [uploadResult, setUploadResult] = useState(null)
+  const [uploadResults, setUploadResults] = useState([])
   const [error, setError] = useState(null)
+  const [uploadMode, setUploadMode] = useState('single') // 'single' or 'multiple'
   const fileInputRef = useRef(null)
 
   const handleFileSelect = (e) => {
-    const selectedFile = e.target.files[0]
-    if (selectedFile && selectedFile.name.endsWith('.xlsx')) {
-      setFile(selectedFile)
-      setError(null)
+    const selectedFiles = Array.from(e.target.files)
+    
+    if (uploadMode === 'single') {
+      const selectedFile = selectedFiles[0]
+      if (selectedFile && selectedFile.name.endsWith('.xlsx')) {
+        setFiles([selectedFile])
+        setError(null)
+      } else {
+        setError('Please select a valid .xlsx file')
+        setFiles([])
+      }
     } else {
-      setError('Please select a valid .xlsx file')
-      setFile(null)
+      // Multiple mode - validate all files
+      const validFiles = selectedFiles.filter(file => file.name.endsWith('.xlsx'))
+      const invalidFiles = selectedFiles.filter(file => !file.name.endsWith('.xlsx'))
+      
+      if (invalidFiles.length > 0) {
+        setError(`${invalidFiles.length} file(s) skipped - only .xlsx files are allowed`)
+      } else {
+        setError(null)
+      }
+      
+      setFiles(validFiles)
     }
   }
 
@@ -28,27 +45,49 @@ function Upload() {
     e.preventDefault()
     e.stopPropagation()
     
-    const droppedFile = e.dataTransfer.files[0]
-    if (droppedFile && droppedFile.name.endsWith('.xlsx')) {
-      setFile(droppedFile)
-      setError(null)
+    const droppedFiles = Array.from(e.dataTransfer.files)
+    
+    if (uploadMode === 'single') {
+      const droppedFile = droppedFiles[0]
+      if (droppedFile && droppedFile.name.endsWith('.xlsx')) {
+        setFiles([droppedFile])
+        setError(null)
+      } else {
+        setError('Please drop a valid .xlsx file')
+        setFiles([])
+      }
     } else {
-      setError('Please drop a valid .xlsx file')
-      setFile(null)
+      // Multiple mode
+      const validFiles = droppedFiles.filter(file => file.name.endsWith('.xlsx'))
+      const invalidFiles = droppedFiles.filter(file => !file.name.endsWith('.xlsx'))
+      
+      if (invalidFiles.length > 0) {
+        setError(`${invalidFiles.length} file(s) skipped - only .xlsx files are allowed`)
+      } else {
+        setError(null)
+      }
+      
+      setFiles(validFiles)
     }
   }
 
   const handleUpload = async () => {
-    if (!file) return
+    if (files.length === 0) return
 
     setUploading(true)
     setError(null)
-    setUploadResult(null)
+    setUploadResults([])
 
     try {
-      const result = await api.uploadFile(file)
-      setUploadResult(result)
-      setFile(null)
+      let results
+      if (uploadMode === 'single') {
+        results = [await api.uploadFile(files[0])]
+      } else {
+        results = await api.uploadMultipleFiles(files)
+      }
+      
+      setUploadResults(results)
+      setFiles([])
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
       }
@@ -59,9 +98,29 @@ function Upload() {
     }
   }
 
+  const removeFile = (index) => {
+    setFiles(files.filter((_, i) => i !== index))
+  }
+
   return (
     <div className="upload-container">
-      <h2>Upload Excel File</h2>
+      <h2>Upload Excel Files</h2>
+      
+      {/* Upload Mode Toggle */}
+      <div className="upload-mode-toggle">
+        <button 
+          className={uploadMode === 'single' ? 'active' : ''} 
+          onClick={() => setUploadMode('single')}
+        >
+          Single File
+        </button>
+        <button 
+          className={uploadMode === 'multiple' ? 'active' : ''} 
+          onClick={() => setUploadMode('multiple')}
+        >
+          Multiple Files
+        </button>
+      </div>
       
       <div
         className="upload-area"
@@ -72,45 +131,74 @@ function Upload() {
           ref={fileInputRef}
           type="file"
           accept=".xlsx"
+          multiple={uploadMode === 'multiple'}
           onChange={handleFileSelect}
           style={{ display: 'none' }}
           id="file-input"
         />
         
         <label htmlFor="file-input" className="upload-label">
-          {file ? (
-            <div className="file-selected">
-              <p>Selected file: {file.name}</p>
-              <p className="file-size">Size: {(file.size / 1024 / 1024).toFixed(2)} MB</p>
+          {files.length > 0 ? (
+            <div className="files-selected">
+              <p>{files.length} file(s) selected</p>
+              {uploadMode === 'single' && (
+                <p className="file-size">Size: {(files[0].size / 1024 / 1024).toFixed(2)} MB</p>
+              )}
             </div>
           ) : (
             <>
-              <p>Drag and drop your .xlsx file here</p>
+              <p>Drag and drop your .xlsx file{uploadMode === 'multiple' ? 's' : ''} here</p>
               <p>or click to browse</p>
             </>
           )}
         </label>
       </div>
 
+      {/* File List */}
+      {files.length > 0 && (
+        <div className="file-list">
+          <h4>Selected Files:</h4>
+          {files.map((file, index) => (
+            <div key={index} className="file-item">
+              <span className="file-name">{file.name}</span>
+              <span className="file-size">({(file.size / 1024 / 1024).toFixed(2)} MB)</span>
+              {uploadMode === 'multiple' && (
+                <button 
+                  className="remove-file" 
+                  onClick={() => removeFile(index)}
+                  disabled={uploading}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       {error && <div className="error">{error}</div>}
 
-      {file && (
+      {files.length > 0 && (
         <button
           onClick={handleUpload}
           disabled={uploading}
           className="upload-btn"
         >
-          {uploading ? 'Uploading...' : 'Upload and Process'}
+          {uploading ? 'Uploading...' : `Upload and Process ${files.length} File${files.length > 1 ? 's' : ''}`}
         </button>
       )}
 
-      {uploadResult && (
-        <div className="upload-result">
-          <h3>Upload Successful!</h3>
-          <p>File: {uploadResult.filename}</p>
-          <p>Upload ID: {uploadResult.id}</p>
-          <p>Status: {uploadResult.status}</p>
-          <p className="info">Your file is being processed. Check the Processing Status tab for updates.</p>
+      {uploadResults.length > 0 && (
+        <div className="upload-results">
+          <h3>Upload Results</h3>
+          {uploadResults.map((result, index) => (
+            <div key={index} className="upload-result">
+              <p><strong>File:</strong> {result.filename}</p>
+              <p><strong>Status:</strong> {result.status}</p>
+              <p><strong>Upload ID:</strong> {result.id}</p>
+            </div>
+          ))}
+          <p className="info">Your files are being processed in queue. Check the Processing Status tab for updates.</p>
         </div>
       )}
     </div>

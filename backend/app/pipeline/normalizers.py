@@ -9,6 +9,11 @@ class DataNormalizer:
     async def normalize_data(self, df: pd.DataFrame, vendor: str) -> pd.DataFrame:
         """Normalize data to sellout_entries2 schema"""
         
+        print(f"DEBUG: Starting normalization for vendor '{vendor}' with {len(df)} rows")
+        print(f"DEBUG: Input columns: {list(df.columns)}")
+        if len(df) > 0:
+            print(f"DEBUG: Sample input row: {df.iloc[0].to_dict()}")
+        
         vendor_config = self.vendor_detector.get_vendor_config(vendor)
         
         # Create normalized dataframe with sellout_entries2 columns
@@ -40,6 +45,7 @@ class DataNormalizer:
             'sales_inc_vat': 'sales_eur',
             'netsalesvalue': 'sales_eur',
             'exvatnetsales': 'sales_eur',
+            'sales_lc': 'sales_lc',  # Direct mapping for local currency sales
             
             # Product name mappings
             'product_name': 'functional_name',
@@ -61,10 +67,11 @@ class DataNormalizer:
             if source_col in df.columns:
                 normalized_df[target_col] = df[source_col]
         
-        # Special handling for Liberty sales_lc - preserve raw value from column V
-        if vendor == 'liberty' and 'sales_lc' in df.columns:
+        # Special handling for sales_lc - preserve raw value from local currency
+        if vendor in ['liberty', 'skins_nl'] and 'sales_lc' in df.columns:
             # Keep the raw sales_lc value as text (don't convert to EUR)
             normalized_df['sales_lc'] = df['sales_lc'].astype(str)
+            print(f"DEBUG: Preserved sales_lc for {vendor}: {normalized_df['sales_lc'].head().tolist()}")
         
         # Fallback logic: if product_ean is missing but we have SKU, try to use that
         if 'product_ean' not in normalized_df.columns or normalized_df['product_ean'].isna().all():
@@ -72,9 +79,11 @@ class DataNormalizer:
                 # Generate EAN from SKU - for now, use SKU as placeholder
                 normalized_df['product_ean'] = normalized_df['sku_temp'].astype(str).str.zfill(13)
         
-        # Add vendor as reseller (special case for Liberty)
+        # Add vendor as reseller (special cases for proper formatting)
         if vendor == 'liberty':
             normalized_df['reseller'] = 'Liberty'
+        elif vendor == 'skins_nl':
+            normalized_df['reseller'] = 'Skins NL'  # Preserve uppercase NL
         else:
             normalized_df['reseller'] = vendor.replace('_', ' ').title()
         
@@ -99,8 +108,8 @@ class DataNormalizer:
         
         # Handle sales_lc (sales in local currency)
         # If we have both EUR and local currency, use local currency value as sales_lc
-        # Skip this for Liberty as it already handled sales_lc above
-        if vendor != 'liberty' and 'sales_eur' in normalized_df.columns and normalized_df['currency'].notna().any():
+        # Skip this for vendors that already handled sales_lc above
+        if vendor not in ['liberty', 'skins_nl'] and 'sales_eur' in normalized_df.columns and normalized_df['currency'].notna().any():
             # Convert sales_eur to string, but handle NaN values properly
             normalized_df['sales_lc'] = normalized_df['sales_eur'].apply(
                 lambda x: None if pd.isna(x) else str(x)
@@ -148,15 +157,62 @@ class DataNormalizer:
             if col in normalized_df.columns:
                 normalized_df = normalized_df[normalized_df[col].notna()]
         
-        # Remove rows with zero or negative quantity
+        # Remove rows with zero or negative quantity, except when they have sales_lc values (returns, refunds, adjustments)
         if 'quantity' in normalized_df.columns:
-            # Remove rows with zero, negative, or non-numeric quantities
-            normalized_df = normalized_df[normalized_df['quantity'] > 0]
+            # Convert quantity to numeric first to handle string values
+            normalized_df['quantity'] = pd.to_numeric(normalized_df['quantity'], errors='coerce')
+            
+            # Include rows with positive quantity OR rows with zero/negative quantity that have sales_lc values
+            if 'sales_lc' in normalized_df.columns:
+                # Convert sales_lc to numeric for comparison (handle string values like "0.00", "-10.50")
+                def clean_sales_value(val):
+                    if pd.isna(val):
+                        return 0
+                    if isinstance(val, str):
+                        cleaned = val.strip().replace(',', '').replace('$', '').replace('£', '')
+                        try:
+                            return float(cleaned) if cleaned else 0
+                        except ValueError:
+                            return 0
+                    try:
+                        return float(val)
+                    except (ValueError, TypeError):
+                        return 0
+                
+                sales_lc_numeric = normalized_df['sales_lc'].apply(clean_sales_value)
+                
+                valid_rows_mask = (normalized_df['quantity'] > 0) | (
+                    (normalized_df['quantity'] <= 0) & 
+                    (normalized_df['sales_lc'].notna()) & 
+                    (sales_lc_numeric != 0)
+                )
+                
+                # Debug logging for zero/negative quantity decisions
+                zero_with_sales = ((normalized_df['quantity'] == 0) & (sales_lc_numeric != 0)).sum()
+                zero_without_sales = ((normalized_df['quantity'] == 0) & (sales_lc_numeric == 0)).sum()
+                negative_with_sales = ((normalized_df['quantity'] < 0) & (sales_lc_numeric != 0)).sum()
+                negative_without_sales = ((normalized_df['quantity'] < 0) & (sales_lc_numeric == 0)).sum()
+                
+                print(f"DEBUG: Zero quantity - Including {zero_with_sales} rows with sales, Excluding {zero_without_sales} rows without sales")
+                print(f"DEBUG: Negative quantity - Including {negative_with_sales} rows with sales, Excluding {negative_without_sales} rows without sales")
+                
+                normalized_df = normalized_df[valid_rows_mask]
+            else:
+                # Original logic for vendors without sales_lc
+                normalized_df = normalized_df[normalized_df['quantity'] > 0]
+            
             # Convert to nullable integer after filtering
             normalized_df['quantity'] = normalized_df['quantity'].astype('Int64')
         
         # Clean up temporary columns
         if 'sku_temp' in normalized_df.columns:
             normalized_df = normalized_df.drop('sku_temp', axis=1)
+        
+        print(f"DEBUG: Normalization complete for vendor '{vendor}' - {len(normalized_df)} rows")
+        print(f"DEBUG: Final normalized columns: {list(normalized_df.columns)}")
+        if len(normalized_df) > 0:
+            print(f"DEBUG: Sample normalized row: {normalized_df.iloc[0].to_dict()}")
+        else:
+            print("WARNING: No rows in normalized data - all data was filtered out!")
         
         return normalized_df

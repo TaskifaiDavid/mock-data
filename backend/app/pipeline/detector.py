@@ -15,6 +15,8 @@ class VendorDetector:
             return "boxnox"
         elif "skins sa" in filename_lower:
             return "skins_sa"
+        elif "bibbiparfu" in filename_lower:
+            return "skins_nl"
         elif "cdlc" in filename_lower:
             return "cdlc"
         elif "continuity" in filename_lower:
@@ -27,6 +29,8 @@ class VendorDetector:
             sheet_names = [s.lower() for s in df.sheet_names]
             if any("sell out by ean" in s for s in sheet_names):
                 return "boxnox"
+            elif any("salespersku" in s for s in sheet_names):
+                return "skins_nl"
             elif any("bibbi" in s for s in sheet_names):
                 return "skins_sa"
             elif any("tdsheet" in s for s in sheet_names):
@@ -77,6 +81,12 @@ class VendorDetector:
             },
             "liberty": {
                 "currency": "GBP",
+                "header_row": 0,
+                "pivot_format": False,
+                "date_columns": []
+            },
+            "skins_nl": {
+                "currency": "EUR",
                 "header_row": 0,
                 "pivot_format": False,
                 "date_columns": []
