@@ -109,13 +109,13 @@ function Upload() {
       {/* Upload Mode Toggle */}
       <div className="upload-mode-toggle">
         <button 
-          className={uploadMode === 'single' ? 'active' : ''} 
+          className={`btn-secondary ${uploadMode === 'single' ? 'active' : ''}`} 
           onClick={() => setUploadMode('single')}
         >
           Single File
         </button>
         <button 
-          className={uploadMode === 'multiple' ? 'active' : ''} 
+          className={`btn-secondary ${uploadMode === 'multiple' ? 'active' : ''}`} 
           onClick={() => setUploadMode('multiple')}
         >
           Multiple Files
@@ -182,7 +182,7 @@ function Upload() {
         <button
           onClick={handleUpload}
           disabled={uploading}
-          className="upload-btn"
+          className="upload-btn btn-primary"
         >
           {uploading ? 'Uploading...' : `Upload and Process ${files.length} File${files.length > 1 ? 's' : ''}`}
         </button>

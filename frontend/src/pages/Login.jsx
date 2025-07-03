@@ -62,7 +62,7 @@ function Login({ onLoginSuccess }) {
   return (
     <div className="login-container">
       <div className="login-box">
-        <h1>Data Cleaning Pipeline</h1>
+        <h1>Data Pipeline</h1>
         <h2>Login</h2>
         
         <form onSubmit={handleLogin}>
@@ -92,7 +92,7 @@ function Login({ onLoginSuccess }) {
 
           {error && <div className="error">{error}</div>}
 
-          <button type="submit" disabled={loading}>
+          <button type="submit" disabled={loading} className="btn-primary">
             {loading ? 'Logging in...' : 'Login'}
           </button>
         </form>

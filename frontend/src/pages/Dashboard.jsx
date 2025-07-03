@@ -17,10 +17,10 @@ function Dashboard({ user, onLogout }) {
   return (
     <div className="dashboard">
       <header className="dashboard-header">
-        <h1>Data Cleaning Pipeline</h1>
+        <h1>Data Pipeline</h1>
         <div className="user-info">
           <span>{user?.email || 'Unknown User'}</span>
-          <button onClick={handleLogout} className="logout-btn">
+          <button onClick={handleLogout} className="logout-btn btn-secondary">
             Logout
           </button>
         </div>
