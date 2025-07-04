@@ -424,13 +424,202 @@ class DataCleaner:
     async def _clean_cdlc_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
         transformations = []
         
-        # Skip first 2 rows if header is at row 3
-        if len(df) > 3:
-            df = df.iloc[2:].reset_index(drop=True)
-            df.columns = df.iloc[0]
-            df = df[1:]
+        # Extract year and month from filename or cell B2
+        year, month = self._extract_cdlc_date_from_filename_or_data(df)
         
-        return df, transformations
+        print(f"DEBUG: CDLC processing for Year: {year}, Month: {month}")
+        print(f"DEBUG: Original DataFrame shape: {df.shape}")
+        print(f"DEBUG: DataFrame columns: {list(df.columns)}")
+        
+        # Handle pivot table format - data starts at row 4 (0-indexed), headers at row 3
+        print(f"DEBUG: === HEADER PROCESSING STEP ===")
+        print(f"DEBUG: Original DataFrame shape before header processing: {df.shape}")
+        
+        if len(df) > 2:
+            print(f"DEBUG: Skipping first 2 rows (0-1), keeping rows 2+ as header and data")
+            print(f"DEBUG: Row 2 (header): {df.iloc[2].tolist()}")
+            print(f"DEBUG: Rows 3+ (data): {len(df) - 3} rows")
+            
+            # Show what rows we're about to keep
+            for i in range(2, min(len(df), 12)):  # Show first few rows
+                print(f"DEBUG: Row {i}: {df.iloc[i].tolist()}")
+            
+            # Skip first 2 rows to get to header row
+            df = df.iloc[2:].reset_index(drop=True)
+            print(f"DEBUG: After iloc[2:] - shape: {df.shape}")
+            
+            # Set column names from first row (header row)
+            if len(df) > 0:
+                print(f"DEBUG: Setting column names from row 0: {df.iloc[0].tolist()}")
+                df.columns = df.iloc[0]
+                print(f"DEBUG: Before dropping header row - shape: {df.shape}")
+                df = df[1:].reset_index(drop=True)
+                print(f"DEBUG: After dropping header row - final shape: {df.shape}")
+            else:
+                print("DEBUG: ERROR - No rows left after iloc[2:]!")
+        else:
+            print(f"DEBUG: ERROR - DataFrame too short ({len(df)} rows), expected at least 3 rows")
+        
+        print(f"DEBUG: After header processing - DataFrame shape: {df.shape}")
+        print(f"DEBUG: Column names after header processing: {list(df.columns)}")
+        print(f"DEBUG: Expected 7 data rows, actual rows available: {len(df)}")
+        
+        # Show all rows after header processing
+        print("DEBUG: All rows after header processing:")
+        for i in range(len(df)):
+            row_data = df.iloc[i].tolist()
+            print(f"  Row {i}: {row_data}")
+        print()
+        
+        # Process pivot table format with multiple store locations
+        processed_rows = []
+        total_rows_processed = 0
+        skipped_rows = []
+        
+        for idx, row in df.iterrows():
+            total_rows_processed += 1
+            print(f"DEBUG: === PROCESSING ROW {idx} (iteration {total_rows_processed}) ===")
+            
+            # Show raw row data
+            row_data = row.tolist()
+            print(f"DEBUG: Raw row data: {row_data}")
+            
+            # Check column 1 for EAN
+            col1_value = row.iloc[1] if len(row) > 1 else None
+            print(f"DEBUG: Column 1 (EAN position) value: '{col1_value}' (type: {type(col1_value)})")
+            
+            # Skip empty rows or rows without EAN  
+            if pd.isna(col1_value) or str(col1_value).strip() == '':
+                print(f"DEBUG: SKIPPING row {idx} - empty EAN (column 1 is empty)")
+                skipped_rows.append(f"Row {idx}: Empty EAN")
+                continue
+                
+            # Extract EAN from column 1 (contains EAN data after header processing)
+            ean = str(col1_value).strip()
+            print(f"DEBUG: Extracted EAN: '{ean}' (length: {len(ean)})")
+            
+            # Validate EAN is 13 digits
+            if not ean.isdigit():
+                print(f"DEBUG: SKIPPING row {idx} - EAN not all digits: '{ean}'")
+                skipped_rows.append(f"Row {idx}: EAN not digits - '{ean}'")
+                continue
+            elif len(ean) != 13:
+                print(f"DEBUG: SKIPPING row {idx} - EAN wrong length: '{ean}' (length: {len(ean)})")
+                skipped_rows.append(f"Row {idx}: EAN wrong length - '{ean}' (length: {len(ean)})")
+                continue
+            
+            print(f"DEBUG: ✓ Valid EAN: '{ean}'")
+            
+            # Extract product name from column 2 (contains product descriptions after header processing)
+            col2_value = row.iloc[2] if len(row) > 2 else None
+            functional_name = str(col2_value).strip() if pd.notna(col2_value) else ''
+            print(f"DEBUG: Product name (column 2): '{functional_name}'")
+            
+            # Read totals directly from the last two columns (Total Qty and Total Sales)
+            # After header processing: Column 13 = Total Qty, Column 14 = Total Sales
+            total_quantity = 0
+            total_sales = 0
+            
+            # Extract quantity from column 13 (Total Qty column)
+            if 13 < len(row):
+                qty_val = row.iloc[13]
+                print(f"DEBUG: Column 13 (Total Qty) raw value: '{qty_val}' (type: {type(qty_val)})")
+                if pd.notna(qty_val) and str(qty_val).strip():
+                    try:
+                        total_quantity = float(str(qty_val).strip())
+                        print(f"DEBUG: ✓ Parsed quantity: {total_quantity}")
+                    except ValueError as e:
+                        print(f"DEBUG: Failed to parse quantity '{qty_val}': {e}")
+                        total_quantity = 0
+                else:
+                    print(f"DEBUG: Column 13 is empty or NaN")
+            else:
+                print(f"DEBUG: Row too short for column 13 (row length: {len(row)})")
+            
+            # Extract sales from column 14 (Total Sales column)  
+            if 14 < len(row):
+                sales_val = row.iloc[14]
+                print(f"DEBUG: Column 14 (Total Sales) raw value: '{sales_val}' (type: {type(sales_val)})")
+                if pd.notna(sales_val) and str(sales_val).strip():
+                    try:
+                        total_sales = float(str(sales_val).strip())
+                        print(f"DEBUG: ✓ Parsed sales: {total_sales}")
+                    except ValueError as e:
+                        print(f"DEBUG: Failed to parse sales '{sales_val}': {e}")
+                        total_sales = 0
+                else:
+                    print(f"DEBUG: Column 14 is empty or NaN")
+            else:
+                print(f"DEBUG: Row too short for column 14 (row length: {len(row)})")
+            
+            print(f"DEBUG: Final values - Qty: {total_quantity}, Sales: {total_sales}")
+            
+            # Only include rows with non-zero quantity or sales
+            if total_quantity > 0 or total_sales > 0:
+                print(f"DEBUG: ✓ INCLUDING row {idx} - has non-zero quantity or sales")
+                processed_rows.append({
+                    'product_ean': ean,
+                    'functional_name': '',
+                    'quantity': total_quantity,
+                    'sales_lc': total_sales,
+                    'report_year': year,
+                    'report_month': month,
+                    'reseller': 'Creme de la Creme',
+                    'currency': 'EUR'
+                })
+                
+                print(f"DEBUG: ✓ ADDED to processed_rows - EAN: {ean}, Qty: {total_quantity}, Sales: {total_sales}")
+            else:
+                print(f"DEBUG: ✗ EXCLUDING row {idx} - zero quantity and zero sales")
+                skipped_rows.append(f"Row {idx}: Zero quantity ({total_quantity}) and zero sales ({total_sales})")
+            
+            print() # Empty line for readability
+        
+        # Summary of processing
+        print("DEBUG: === PROCESSING SUMMARY ===")
+        print(f"DEBUG: Total rows processed: {total_rows_processed}")
+        print(f"DEBUG: Rows successfully added: {len(processed_rows)}")
+        print(f"DEBUG: Rows skipped: {len(skipped_rows)}")
+        if skipped_rows:
+            print("DEBUG: Reasons for skipping:")
+            for reason in skipped_rows:
+                print(f"  - {reason}")
+        print()
+        
+        # Create new DataFrame from processed rows
+        if processed_rows:
+            df_cleaned = pd.DataFrame(processed_rows)
+            print(f"DEBUG: Created cleaned DataFrame with {len(df_cleaned)} rows")
+        else:
+            df_cleaned = pd.DataFrame()
+            print("DEBUG: No valid rows found, returning empty DataFrame")
+        
+        # Log transformations
+        transformations.append({
+            "row_index": 0,
+            "column_name": "pivot_processing",
+            "original_value": f"Pivot table with {len(df)} rows",
+            "cleaned_value": f"Aggregated to {len(df_cleaned)} product entries",
+            "transformation_type": "pivot_table_aggregation"
+        })
+        
+        transformations.append({
+            "row_index": 0,
+            "column_name": "report_year",
+            "original_value": None,
+            "cleaned_value": year,
+            "transformation_type": "date_extraction"
+        })
+        
+        transformations.append({
+            "row_index": 0,
+            "column_name": "report_month",
+            "original_value": None,
+            "cleaned_value": month,
+            "transformation_type": "date_extraction"
+        })
+        
+        return df_cleaned, transformations
     
     async def _clean_continuity_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
         transformations = []
@@ -971,6 +1160,55 @@ class DataCleaner:
             return year, month
         
         print("DEBUG: No BOXNOX date pattern found, using defaults")
+        return 2025, 4  # Default if parsing fails
+    
+    def _extract_cdlc_date_from_filename_or_data(self, df: pd.DataFrame) -> Tuple[int, int]:
+        """Extract year and month from CDLC filename or cell B2"""
+        # First try to extract from filename
+        if self.current_filename:
+            print(f"DEBUG: Extracting date from CDLC filename: '{self.current_filename}'")
+            
+            # Pattern: YYYY MM in filename (e.g., "BIBBI_Sell_Out_2025 04.xlsx")
+            date_pattern = r'(\d{4})\s+(\d{2})'
+            match = re.search(date_pattern, self.current_filename)
+            
+            if match:
+                year = int(match.group(1))
+                month = int(match.group(2))
+                print(f"DEBUG: Found date in filename - Year: {year}, Month: {month}")
+                return year, month
+        
+        # If filename parsing fails, try to extract from cell B2
+        try:
+            if len(df) > 1 and len(df.columns) > 1:
+                # Cell B2 should contain format "YYYY Month" (e.g., "2025 April")
+                cell_b2_value = df.iloc[1, 1]  # Row 2, Column B (0-indexed)
+                if pd.notna(cell_b2_value):
+                    cell_value = str(cell_b2_value).strip()
+                    print(f"DEBUG: Checking cell B2 for date: '{cell_value}'")
+                    
+                    # Pattern: YYYY Month
+                    date_pattern = r'(\d{4})\s+(\w+)'
+                    match = re.search(date_pattern, cell_value)
+                    
+                    if match:
+                        year = int(match.group(1))
+                        month_name = match.group(2).lower()
+                        
+                        # Convert month name to number
+                        month_mapping = {
+                            'january': 1, 'february': 2, 'march': 3, 'april': 4,
+                            'may': 5, 'june': 6, 'july': 7, 'august': 8,
+                            'september': 9, 'october': 10, 'november': 11, 'december': 12
+                        }
+                        
+                        month = month_mapping.get(month_name, 1)
+                        print(f"DEBUG: Found date in cell B2 - Year: {year}, Month: {month_name} ({month})")
+                        return year, month
+        except Exception as e:
+            print(f"DEBUG: Error extracting date from cell B2: {e}")
+        
+        print("DEBUG: No CDLC date pattern found, using defaults")
         return 2025, 4  # Default if parsing fails
     
     async def _clean_ukraine_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:

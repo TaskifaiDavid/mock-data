@@ -74,7 +74,7 @@ class DataNormalizer:
                 normalized_df['sku_temp'] = df['sku']
         
         # Special handling for sales_lc - preserve raw value from local currency
-        if vendor in ['liberty', 'skins_nl'] and 'sales_lc' in df.columns:
+        if vendor in ['liberty', 'skins_nl', 'cdlc'] and 'sales_lc' in df.columns:
             # Keep the raw sales_lc value as text (don't convert to EUR)
             normalized_df['sales_lc'] = df['sales_lc'].astype(str)
             print(f"DEBUG: Preserved sales_lc for {vendor}: {normalized_df['sales_lc'].head().tolist()}")
@@ -90,6 +90,8 @@ class DataNormalizer:
             normalized_df['reseller'] = 'Liberty'
         elif vendor == 'skins_nl':
             normalized_df['reseller'] = 'Skins NL'  # Preserve uppercase NL
+        elif vendor == 'cdlc':
+            normalized_df['reseller'] = 'Creme de la Creme'  # CDLC files are for Creme de la Creme reseller
         else:
             normalized_df['reseller'] = vendor.replace('_', ' ').title()
         

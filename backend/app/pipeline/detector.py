@@ -17,7 +17,7 @@ class VendorDetector:
             return "skins_sa"
         elif "bibbiparfu" in filename_lower:
             return "skins_nl"
-        elif "cdlc" in filename_lower:
+        elif "cdlc" in filename_lower or ("bibbi" in filename_lower and ("sell_out" in filename_lower or "sell out" in filename_lower)):
             return "cdlc"
         elif "continuity" in filename_lower:
             return "liberty"
@@ -32,7 +32,11 @@ class VendorDetector:
             elif any("salespersku" in s for s in sheet_names):
                 return "skins_nl"
             elif any("bibbi" in s for s in sheet_names):
-                return "skins_sa"
+                # Check if it's CDLC format (YYYY MM pattern) or Skins SA
+                if any(re.match(r'^\d{4}\s+\d{2}$', s) for s in sheet_names):
+                    return "cdlc"
+                else:
+                    return "skins_sa"
             elif any("tdsheet" in s for s in sheet_names):
                 return "ukraine"
         
@@ -63,8 +67,8 @@ class VendorDetector:
             },
             "cdlc": {
                 "currency": "EUR",
-                "header_row": 2,
-                "pivot_format": False,
+                "header_row": 3,
+                "pivot_format": True,
                 "date_columns": []
             },
             "continuity": {
