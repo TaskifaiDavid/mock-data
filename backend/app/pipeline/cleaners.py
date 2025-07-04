@@ -133,19 +133,153 @@ class DataCleaner:
     async def _clean_skins_sa_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
         transformations = []
         
+        # Extract year and month from filename
+        year, month = self._extract_skins_sa_date_from_filename()
+        
+        # Debug: Log available columns
+        print(f"DEBUG: Available columns in Skins SA file: {list(df.columns)}")
+        
         # Column mapping for Skins SA
         column_mapping = {
             'OrderDate': 'order_date',
             'Branch': 'store',
             'StockCode': 'ean',
             'OrderQty': 'quantity',
-            'NetSalesValue': 'net_value',
-            'ExVatNetsales': 'net_value',
-            'MONTH': 'report_month',
-            'YEAR': 'report_year'
+            ' ExVatNetsales': 'sales_lc',  # Note: space in column name
+            'ExVatNetsales': 'sales_lc',
+            'MONTH': 'file_month',
+            'YEAR': 'file_year'
         }
         
+        print(f"DEBUG: Column mapping for Skins SA: {column_mapping}")
+        
+        # Rename columns
         df.rename(columns=column_mapping, inplace=True)
+        print(f"DEBUG: Columns after mapping: {list(df.columns)}")
+        
+        # Clean EAN data types - convert floats to strings and normalize
+        if 'ean' in df.columns:
+            print(f"DEBUG: Cleaning EAN data types. Sample before: {df['ean'].head().tolist()}")
+            
+            for idx, value in df['ean'].items():
+                if pd.notna(value):
+                    original_value = value
+                    
+                    # Convert to string and remove decimal points from floats
+                    clean_value = str(value).strip()
+                    if clean_value.endswith('.0'):
+                        clean_value = clean_value[:-2]  # Remove .0
+                    
+                    # Ensure EAN is digits only and normalize to 13 digits
+                    if clean_value.isdigit():
+                        clean_value = clean_value.zfill(13)
+                        
+                        if clean_value != str(original_value):
+                            df.at[idx, 'ean'] = clean_value
+                            transformations.append({
+                                "row_index": idx,
+                                "column_name": "ean",
+                                "original_value": original_value,
+                                "cleaned_value": clean_value,
+                                "transformation_type": "ean_normalization"
+                            })
+                    else:
+                        print(f"DEBUG: Invalid EAN format at row {idx}: '{clean_value}' (original: '{original_value}')")
+            
+            print(f"DEBUG: Sample EANs after cleaning: {df['ean'].head().tolist()}")
+        
+        # Filter rows - skip rows without StockCode/ean
+        if 'ean' in df.columns:
+            print(f"DEBUG: Filtering rows with missing StockCode/ean. Rows before: {len(df)}")
+            
+            # Remove rows where ean is null, empty, or whitespace
+            initial_count = len(df)
+            df = df[df['ean'].notna() & (df['ean'] != '') & (df['ean'].astype(str).str.strip() != '')]
+            filtered_count = len(df)
+            
+            print(f"DEBUG: Rows after filtering missing StockCode: {filtered_count}")
+            
+            transformations.append({
+                "row_index": 0,
+                "column_name": "ean_filter",
+                "original_value": f"All rows: {initial_count}",
+                "cleaned_value": f"Filtered rows with valid StockCode: {filtered_count}",
+                "transformation_type": "stockcode_filtering"
+            })
+        
+        # Filter by month/year matching filename date
+        if 'file_month' in df.columns and 'file_year' in df.columns:
+            print(f"DEBUG: Filtering by month/year from filename. Target: {month}/{year}")
+            
+            initial_count = len(df)
+            df_filtered = df[
+                (pd.to_numeric(df['file_month'], errors='coerce') == month) & 
+                (pd.to_numeric(df['file_year'], errors='coerce') == year)
+            ].copy()
+            
+            final_count = len(df_filtered)
+            print(f"DEBUG: After date filtering - kept {final_count} rows out of {initial_count}")
+            
+            transformations.append({
+                "row_index": 0,
+                "column_name": "date_filter",
+                "original_value": f"All rows: {initial_count}",
+                "cleaned_value": f"Filtered to Year {year}, Month {month}: {final_count} rows",
+                "transformation_type": "month_year_filtering"
+            })
+            
+            df = df_filtered
+        else:
+            print("DEBUG: No MONTH/YEAR columns found in data, skipping date filtering")
+        
+        # Clean ZAR currency values - remove spaces and convert to numeric
+        if 'sales_lc' in df.columns:
+            for idx, value in df['sales_lc'].items():
+                if pd.notna(value) and value != '':
+                    # Remove spaces and convert to numeric
+                    clean_value = str(value).replace(' ', '').replace(',', '').strip()
+                    if clean_value:
+                        try:
+                            numeric_value = float(clean_value)
+                            df.at[idx, 'sales_lc'] = str(numeric_value)
+                            transformations.append({
+                                "row_index": idx,
+                                "column_name": "sales_lc",
+                                "original_value": value,
+                                "cleaned_value": str(numeric_value),
+                                "transformation_type": "currency_cleaning"
+                            })
+                        except ValueError:
+                            # If conversion fails, keep original value
+                            pass
+        
+        # Add year and month columns from filename
+        df['report_year'] = year
+        df['report_month'] = month
+        
+        # Add reseller and currency
+        df['reseller'] = 'Skins SA'
+        df['currency'] = 'ZAR'
+        
+        # Add empty functional_name (not available in Skins SA data)
+        df['functional_name'] = ''
+        
+        # Log transformations for date fields
+        transformations.append({
+            "row_index": 0,
+            "column_name": "report_year",
+            "original_value": None,
+            "cleaned_value": year,
+            "transformation_type": "filename_date_extraction"
+        })
+        
+        transformations.append({
+            "row_index": 0,
+            "column_name": "report_month",
+            "original_value": None,
+            "cleaned_value": month,
+            "transformation_type": "filename_date_extraction"
+        })
         
         return df, transformations
     
@@ -761,6 +895,52 @@ class DataCleaner:
         
         print("DEBUG: No ReportPeriod date pattern found, using defaults")
         return 2025, 1  # Default if parsing fails
+    
+    def _extract_skins_sa_date_from_filename(self) -> Tuple[int, int]:
+        """Extract year and month from Skins SA filename format (e.g., 'Skins SA BIBBI CY 2025 February')"""
+        if not self.current_filename:
+            return 2025, 1  # Default values
+        
+        print(f"DEBUG: Extracting date from Skins SA filename: '{self.current_filename}'")
+        
+        # Pattern: Skins SA BIBBI CY 2025 February
+        # Example: "Skins SA BIBBI CY 2025 February.xlsx"
+        
+        # First try to extract year (4 digits)
+        year_pattern = r'(\d{4})'
+        year_match = re.search(year_pattern, self.current_filename)
+        
+        if year_match:
+            year = int(year_match.group(1))
+            print(f"DEBUG: Found year: {year}")
+        else:
+            year = 2025  # Default
+            print(f"DEBUG: No year found, using default: {year}")
+        
+        # Then try to extract month name
+        month_names = {
+            'january': 1, 'february': 2, 'march': 3, 'april': 4,
+            'may': 5, 'june': 6, 'july': 7, 'august': 8,
+            'september': 9, 'october': 10, 'november': 11, 'december': 12,
+            'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4,
+            'may': 5, 'jun': 6, 'jul': 7, 'aug': 8,
+            'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
+        }
+        
+        month = 1  # Default
+        filename_lower = self.current_filename.lower()
+        
+        for month_name, month_num in month_names.items():
+            if month_name in filename_lower:
+                month = month_num
+                print(f"DEBUG: Found month '{month_name}' -> {month}")
+                break
+        
+        if month == 1:
+            print(f"DEBUG: No month found in filename, using default: {month}")
+        
+        print(f"DEBUG: Final Skins SA date - Month: {month}, Year: {year}")
+        return year, month
     
     def _parse_month_name(self, month_name: str) -> int:
         """Convert month name to number (e.g., 'APR' -> 4)"""

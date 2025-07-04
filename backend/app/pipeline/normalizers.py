@@ -115,7 +115,7 @@ class DataNormalizer:
         # Handle sales_lc (sales in local currency)
         # If we have both EUR and local currency, use local currency value as sales_lc
         # Skip this for vendors that already handled sales_lc above
-        if vendor not in ['liberty', 'skins_nl'] and 'sales_eur' in normalized_df.columns and normalized_df['currency'].notna().any():
+        if vendor not in ['liberty', 'skins_nl', 'skins_sa'] and 'sales_eur' in normalized_df.columns and normalized_df['currency'].notna().any():
             # Convert sales_eur to string, but handle NaN values properly
             normalized_df['sales_lc'] = normalized_df['sales_eur'].apply(
                 lambda x: None if pd.isna(x) else str(x)
