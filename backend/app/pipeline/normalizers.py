@@ -92,6 +92,8 @@ class DataNormalizer:
             normalized_df['reseller'] = 'Skins NL'  # Preserve uppercase NL
         elif vendor == 'cdlc':
             normalized_df['reseller'] = 'Creme de la Creme'  # CDLC files are for Creme de la Creme reseller
+        elif vendor == 'aromateque':
+            normalized_df['reseller'] = 'Aromateque'  # Preserve proper capitalization
         else:
             normalized_df['reseller'] = vendor.replace('_', ' ').title()
         
@@ -154,6 +156,10 @@ class DataNormalizer:
                 # For Boxnox, convert SKU to uppercase
                 normalized_df['functional_name'] = normalized_df['functional_name'].str.strip().str.upper()
                 print("DEBUG: Converted functional_name to uppercase for Boxnox SKU data")
+            elif vendor == 'aromateque':
+                # For Aromateque, preserve uppercase functional_name (set in cleaner)
+                normalized_df['functional_name'] = normalized_df['functional_name'].str.strip().str.upper()
+                print("DEBUG: Preserved uppercase functional_name for Aromateque data")
             else:
                 # For other vendors, apply title case as before
                 normalized_df['functional_name'] = normalized_df['functional_name'].str.strip().str.title()

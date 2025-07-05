@@ -20,23 +20,36 @@ class DataCleaner:
         df_clean = df_clean.dropna(how='all')
         
         # Apply vendor-specific cleaning
+        print(f"DEBUG: Applying vendor-specific cleaning for vendor: '{vendor}'")
         if vendor == "galilu":
+            print("DEBUG: Using _clean_galilu_data()")
             df_clean, trans = await self._clean_galilu_data(df_clean)
         elif vendor == "boxnox":
+            print("DEBUG: Using _clean_boxnox_data()")
             df_clean, trans = await self._clean_boxnox_data(df_clean)
         elif vendor == "skins_sa":
+            print("DEBUG: Using _clean_skins_sa_data()")
             df_clean, trans = await self._clean_skins_sa_data(df_clean)
         elif vendor == "skins_nl":
+            print("DEBUG: Using _clean_skins_nl_data()")
             df_clean, trans = await self._clean_skins_nl_data(df_clean)
         elif vendor == "cdlc":
+            print("DEBUG: Using _clean_cdlc_data()")
             df_clean, trans = await self._clean_cdlc_data(df_clean)
         elif vendor == "continuity":
+            print("DEBUG: Using _clean_continuity_data()")
             df_clean, trans = await self._clean_continuity_data(df_clean)
         elif vendor == "liberty":
+            print("DEBUG: Using _clean_liberty_data()")
             df_clean, trans = await self._clean_liberty_data(df_clean)
         elif vendor == "ukraine":
+            print("DEBUG: Using _clean_ukraine_data()")
             df_clean, trans = await self._clean_ukraine_data(df_clean)
+        elif vendor == "aromateque":
+            print("DEBUG: Using _clean_aromateque_data()")
+            df_clean, trans = await self._clean_aromateque_data(df_clean)
         else:
+            print(f"DEBUG: Using _clean_generic_data() for unknown vendor: '{vendor}'")
             df_clean, trans = await self._clean_generic_data(df_clean)
         
         transformations.extend(trans)
@@ -1219,6 +1232,421 @@ class DataCleaner:
         transformations.extend(trans)
         
         return df, transformations
+    
+    async def _clean_aromateque_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
+        transformations = []
+        
+        # Extract year and month from filename (format: march'25)
+        year, month = self._extract_aromateque_date_from_filename()
+        
+        print(f"DEBUG: Aromateque processing for Year: {year}, Month: {month}")
+        print(f"DEBUG: Original DataFrame shape: {df.shape}")
+        print(f"DEBUG: DataFrame columns: {list(df.columns)}")
+        
+        # Handle pivot table format - headers at row 12 (0-indexed), data starts at row 13
+        print(f"DEBUG: === HEADER PROCESSING STEP ===")
+        print(f"DEBUG: Original DataFrame shape before header processing: {df.shape}")
+        print(f"DEBUG: DataFrame read with header=None, all columns are numeric indices")
+        
+        # With header=None, everything is 0-indexed and we have numeric column names
+        # Corrected: header row is 10 (contains datetime values), data starts at row 11
+        if len(df) > 10:
+            print(f"DEBUG: Using row 10 as header (contains datetime values)")
+            print(f"DEBUG: Skipping rows 0-9 (store summary data)")
+            print(f"DEBUG: Row 10 (header): {df.iloc[10].tolist()}")
+            print(f"DEBUG: Rows 11+ (product data): {len(df) - 11} rows")
+            
+            # Show what rows we're about to keep
+            for i in range(min(len(df), 15)):  # Show first few rows including header
+                print(f"DEBUG: Row {i}: {df.iloc[i].tolist()}")
+            
+            # Skip first 10 rows to get to header row
+            df = df.iloc[10:].reset_index(drop=True)
+            print(f"DEBUG: After iloc[10:] - shape: {df.shape}")
+            
+            # Set column names from first row (header row at original row 10)
+            header_row = df.iloc[0].tolist()
+            print(f"DEBUG: Setting column names from row 0 (original row 10): {header_row}")
+            # Clean up any NaN values in headers
+            cleaned_headers = []
+            for i, header in enumerate(header_row):
+                if pd.isna(header) or str(header).strip() == '':
+                    cleaned_headers.append(f'Unnamed_{i}')
+                else:
+                    cleaned_headers.append(str(header).strip())
+            
+            df.columns = cleaned_headers
+            print(f"DEBUG: Cleaned column names: {df.columns.tolist()}")
+            print(f"DEBUG: Before dropping header row - shape: {df.shape}")
+            df = df[1:].reset_index(drop=True)
+            print(f"DEBUG: After dropping header row - final shape: {df.shape}")
+        else:
+            print(f"DEBUG: ERROR - DataFrame too short ({len(df)} rows), expected at least 11 rows")
+        
+        print(f"DEBUG: After header processing - DataFrame shape: {df.shape}")
+        print(f"DEBUG: Column names after header processing: {list(df.columns)}")
+        
+        # Debug: Show each column name with its index and type
+        print("DEBUG: Detailed column analysis:")
+        for i, col in enumerate(df.columns):
+            print(f"  Column {i}: '{col}' (type: {type(col)}, str: '{str(col)}')")
+        
+        # Find the target date column for the extracted month/year
+        # Ukrainian month names mapping
+        ukrainian_months = {
+            1: 'січня',     # January
+            2: 'лютого',    # February  
+            3: 'березня',   # March
+            4: 'квітня',    # April
+            5: 'травня',    # May
+            6: 'червня',    # June
+            7: 'липня',     # July
+            8: 'серпня',    # August
+            9: 'вересня',   # September
+            10: 'жовтня',   # October
+            11: 'листопада', # November
+            12: 'грудня'    # December
+        }
+        
+        # Create both target formats
+        ukrainian_month_name = ukrainian_months.get(month, 'березня')
+        year_suffix = str(year)[-2:]  # Get last 2 digits of year (2025 -> 25)
+        target_date_str = f"{ukrainian_month_name}-{year_suffix}"
+        
+        # Create target datetime object (01.MM.YYYY format like in Excel)
+        from datetime import datetime
+        target_datetime = datetime(year, month, 1)
+        
+        print(f"DEBUG: Month {month} -> Ukrainian: '{ukrainian_month_name}' -> Target text: '{target_date_str}'")
+        print(f"DEBUG: Month {month} -> Target datetime: {target_datetime}")
+        
+        target_column = None
+        print("DEBUG: Searching for target column...")
+        
+        # First try: Look for target string in column names
+        for i, col in enumerate(df.columns):
+            col_str = str(col).strip() if pd.notna(col) else 'None'
+            matches = col_str == target_date_str
+            print(f"  Column {i} name: '{col_str}' == '{target_date_str}' ? {matches}")
+            if matches:
+                target_column = col
+                print(f"DEBUG: ✓ Found target date column by name at index {i}: '{target_column}'")
+                break
+        
+        # Second try: Look for target datetime in column names (Excel auto-converted headers)
+        if not target_column:
+            print("DEBUG: Column names don't match text, checking for datetime objects...")
+            for i, col in enumerate(df.columns):
+                col_str = str(col).strip() if pd.notna(col) else 'None'
+                print(f"  Column {i} name: '{col_str}' (type: {type(col)})")
+                
+                # Check if this is a datetime object that matches our target
+                if isinstance(col, str) and col.strip():
+                    try:
+                        # Try to parse the column name as datetime
+                        parsed_datetime = pd.to_datetime(col.strip())
+                        if (parsed_datetime.year == target_datetime.year and 
+                            parsed_datetime.month == target_datetime.month):
+                            target_column = col
+                            print(f"DEBUG: ✓ Found target date column by datetime parsing at index {i}: '{target_column}'")
+                            break
+                    except:
+                        pass
+                
+                # Also check if the string representation looks like our target datetime
+                if target_datetime.strftime('%Y-%m-%d') in col_str:
+                    target_column = col
+                    print(f"DEBUG: ✓ Found target date column by datetime string match at index {i}: '{target_column}'")
+                    break
+        
+        # Third try: Look for target string in first row values (header row data)
+        if not target_column and len(df) > 0:
+            print("DEBUG: Column names don't match, checking first row values for Ukrainian text...")
+            first_row = df.iloc[0]
+            for i, (col, val) in enumerate(first_row.items()):
+                val_str = str(val).strip() if pd.notna(val) else 'None'
+                matches = val_str == target_date_str
+                print(f"  Column {i} value: '{val_str}' == '{target_date_str}' ? {matches}")
+                if matches:
+                    target_column = col
+                    print(f"DEBUG: ✓ Found target date column by first row value at index {i}: '{target_column}'")
+                    break
+        
+        if not target_column:
+            print(f"DEBUG: Target date column {target_date_str} not found, available columns: {list(df.columns)}")
+            # Try alternative formats and partial matches
+            alt_formats = [
+                ukrainian_month_name,  # Just month name
+                f"{ukrainian_month_name}-{year}",  # Full year
+                f"{month:02d}.{year}",  # Numeric format
+                f"01.{month:02d}.{year}",  # Full date format
+                f"{year}-{month:02d}-01",  # ISO format
+                f"{target_datetime.strftime('%Y-%m-%d')}",  # Target datetime as string
+            ]
+            for alt_format in alt_formats:
+                for col in df.columns:
+                    if pd.notna(col) and alt_format in str(col):
+                        target_column = col
+                        print(f"DEBUG: Found alternative date column: {target_column} (matched '{alt_format}')")
+                        break
+                if target_column:
+                    break
+            
+            # Final attempt: Look for columns that contain datetime-like strings matching our target
+            if not target_column:
+                print("DEBUG: Final attempt - checking for datetime strings in columns...")
+                for col in df.columns:
+                    col_str = str(col).strip()
+                    # Check if this looks like a datetime string that matches our target month/year
+                    if (f"{year}-{month:02d}" in col_str or 
+                        f"{month:02d}.{year}" in col_str or
+                        f"01.{month:02d}.{year}" in col_str):
+                        target_column = col
+                        print(f"DEBUG: ✓ Found target date column by datetime pattern: '{target_column}'")
+                        break
+        
+        if not target_column:
+            print("ERROR: Could not find target date column, returning empty DataFrame")
+            return pd.DataFrame(), transformations
+        
+        # Process data rows
+        processed_rows = []
+        print(f"DEBUG: === STARTING ROW PROCESSING ===")
+        print(f"DEBUG: Processing {len(df)} rows looking for data in column '{target_column}'")
+        
+        # Skip first row if it contains header values (like "березня-25")
+        start_row = 1 if len(df) > 0 and any(str(val).strip() in [ukrainian_months.get(i, '') + '-25' for i in range(1, 13)] for val in df.iloc[0]) else 0
+        print(f"DEBUG: Starting data processing from row {start_row} (0=first row, 1=skip header row)")
+        
+        for idx in range(start_row, len(df)):
+            row = df.iloc[idx]
+            print(f"DEBUG: === PROCESSING ROW {idx} ===")
+            print(f"DEBUG: Full row data: {row.tolist()}")
+            
+            # Get functional_name from column index 1 (column B in Excel)
+            # After header processing with header=None, column indices should be preserved
+            functional_name = row.iloc[1] if len(row) > 1 else None
+            print(f"DEBUG: Column index 1 (Excel column B) functional_name: '{functional_name}' (type: {type(functional_name)})")
+            
+            # Also check what's in column index 0 for reference
+            product_name = row.iloc[0] if len(row) > 0 else None  
+            print(f"DEBUG: Column index 0 (Excel column A) product_name: '{product_name}' (type: {type(product_name)})")
+            
+            # Show which column we're looking for quantities in
+            print(f"DEBUG: Looking for quantity in target column: '{target_column}'")
+            
+            # Skip rows without functional_name
+            if pd.isna(functional_name) or str(functional_name).strip() == '':
+                print(f"DEBUG: SKIPPING row {idx} - empty functional_name (value: '{functional_name}')")
+                continue
+            
+            # Debug: Show what's in the target column for this row
+            if target_column in row.index:
+                target_value = row[target_column]
+                print(f"DEBUG: Target column '{target_column}' value: '{target_value}' (type: {type(target_value)})")
+            else:
+                print(f"DEBUG: ERROR - Target column '{target_column}' not found in row!")
+                continue
+            
+            # Get quantity from target date column
+            quantity = row[target_column] if target_column in row.index else None
+            print(f"DEBUG: Quantity from {target_column}: '{quantity}'")
+            
+            # Clean quantity value
+            clean_quantity = 0
+            if pd.notna(quantity) and str(quantity).strip():
+                quantity_str = str(quantity).strip().replace(',', '').replace(' ', '')
+                print(f"DEBUG: Raw quantity: '{quantity}' -> cleaned: '{quantity_str}'")
+                try:
+                    clean_quantity = float(quantity_str)
+                    print(f"DEBUG: ✓ Parsed quantity successfully: {clean_quantity}")
+                except ValueError as e:
+                    print(f"DEBUG: ✗ Could not parse quantity '{quantity}' (cleaned: '{quantity_str}'): {e}")
+                    clean_quantity = 0
+            else:
+                print(f"DEBUG: Quantity is empty/null: '{quantity}'")
+            
+            # Only include rows with positive quantity (as per requirements)
+            print(f"DEBUG: Final quantity for row {idx}: {clean_quantity}")
+            if clean_quantity > 0:
+                # Ensure functional_name is uppercase for database consistency
+                clean_functional_name = str(functional_name).strip().upper()
+                print(f"DEBUG: ✓ INCLUDING row {idx} - functional_name: '{clean_functional_name}' (uppercase), quantity: {clean_quantity}")
+                processed_rows.append({
+                    'functional_name': clean_functional_name,
+                    'quantity': clean_quantity,
+                    'sales_lc': None,  # No sales data available per profile
+                    'product_ean': None,  # Will be looked up later
+                    'report_year': year,
+                    'report_month': month,
+                    'reseller': 'Aromateque',
+                    'currency': 'EUR'
+                })
+            else:
+                clean_functional_name = str(functional_name).strip().upper()
+                print(f"DEBUG: ✗ EXCLUDING row {idx} - zero/negative quantity: {clean_quantity} (functional_name: '{clean_functional_name}')")
+        
+        print(f"DEBUG: === PROCESSING SUMMARY ===")
+        print(f"DEBUG: Total rows processed: {len(df)}")
+        print(f"DEBUG: Rows successfully added: {len(processed_rows)}")
+        print(f"DEBUG: Expected ~16 rows for March data from screenshot")
+        
+        # Show details of processed rows
+        if processed_rows:
+            print(f"DEBUG: Processed rows details:")
+            for i, row in enumerate(processed_rows):
+                print(f"  Row {i}: functional_name='{row['functional_name']}', quantity={row['quantity']}")
+            
+            # Show functional names that were included
+            functional_names = [row['functional_name'] for row in processed_rows]
+            print(f"DEBUG: Functional names included: {functional_names}")
+            
+            # Lookup product EANs using functional_name (SKU codes)
+            print(f"DEBUG: Looking up product EANs for {len(processed_rows)} entries using functional_name (SKU codes)")
+            
+            if not self.db_service:
+                print("ERROR: Database service not available for product lookup")
+                for entry in processed_rows:
+                    entry['product_ean'] = None
+            else:
+                print("DEBUG: Database service is available, proceeding with lookups")
+                successful_lookups = 0
+                failed_lookups = 0
+                
+                for i, entry in enumerate(processed_rows):
+                    functional_name = entry.get('functional_name')
+                    print(f"DEBUG: Processing entry {i+1}/{len(processed_rows)}: functional_name='{functional_name}'")
+                    
+                    if functional_name and str(functional_name).strip():
+                        try:
+                            clean_functional_name = str(functional_name).strip()
+                            print(f"DEBUG: Looking up product for functional_name: '{clean_functional_name}'")
+                            
+                            product = await self.db_service.get_product_by_name(clean_functional_name)
+                            
+                            if product and product.get('ean'):
+                                entry['product_ean'] = product['ean']
+                                successful_lookups += 1
+                                print(f"DEBUG: ✓ Found EAN '{product['ean']}' for functional_name '{clean_functional_name}'")
+                            else:
+                                entry['product_ean'] = None
+                                failed_lookups += 1
+                                print(f"DEBUG: ✗ No EAN found for functional_name '{clean_functional_name}' (product: {product})")
+                                
+                        except Exception as e:
+                            import traceback
+                            entry['product_ean'] = None
+                            failed_lookups += 1
+                            print(f"ERROR: Failed to lookup EAN for '{functional_name}': {str(e)}")
+                            print(f"ERROR: Full traceback: {traceback.format_exc()}")
+                    else:
+                        entry['product_ean'] = None
+                        failed_lookups += 1
+                        print(f"DEBUG: ✗ Skipping entry with empty functional_name")
+                
+                print(f"DEBUG: Product lookup summary - Success: {successful_lookups}, Failed: {failed_lookups}, Total: {len(processed_rows)}")
+                
+                # Filter out entries without EANs (can't insert into database)
+                entries_with_ean = [entry for entry in processed_rows if entry.get('product_ean')]
+                entries_without_ean = [entry for entry in processed_rows if not entry.get('product_ean')]
+                
+                if entries_without_ean:
+                    print(f"WARNING: Filtering out {len(entries_without_ean)} entries without EANs:")
+                    for entry in entries_without_ean:
+                        print(f"  - {entry.get('functional_name', 'Unknown')}")
+                
+                processed_rows = entries_with_ean
+                print(f"DEBUG: After EAN filtering: {len(processed_rows)} entries remain")
+        
+        # Create new DataFrame from processed rows
+        if processed_rows:
+            df_cleaned = pd.DataFrame(processed_rows)
+            print(f"DEBUG: Created cleaned DataFrame with {len(df_cleaned)} rows")
+            print(f"DEBUG: DataFrame columns: {list(df_cleaned.columns)}")
+            print(f"DEBUG: Sample DataFrame content:")
+            print(df_cleaned.head().to_string())
+        else:
+            df_cleaned = pd.DataFrame()
+            print("DEBUG: No valid rows found, returning empty DataFrame")
+        
+        # Log transformations
+        transformations.append({
+            "row_index": 0,
+            "column_name": "pivot_processing",
+            "original_value": f"Pivot table with {len(df)} rows",
+            "cleaned_value": f"Extracted {len(df_cleaned)} product entries for {target_date_str}",
+            "transformation_type": "pivot_table_date_extraction"
+        })
+        
+        transformations.append({
+            "row_index": 0,
+            "column_name": "report_year",
+            "original_value": None,
+            "cleaned_value": year,
+            "transformation_type": "filename_date_extraction"
+        })
+        
+        transformations.append({
+            "row_index": 0,
+            "column_name": "report_month",
+            "original_value": None,
+            "cleaned_value": month,
+            "transformation_type": "filename_date_extraction"
+        })
+        
+        return df_cleaned, transformations
+    
+    def _extract_aromateque_date_from_filename(self) -> Tuple[int, int]:
+        """Extract year and month from Aromateque filename (format: march'25)"""
+        if not self.current_filename:
+            return 2025, 1  # Default values
+        
+        print(f"DEBUG: Extracting date from Aromateque filename: '{self.current_filename}'")
+        
+        # Primary format: month'YY (e.g., march'25, april'25)
+        month_names = {
+            'january': 1, 'february': 2, 'march': 3, 'april': 4,
+            'may': 5, 'june': 6, 'july': 7, 'august': 8,
+            'september': 9, 'october': 10, 'november': 11, 'december': 12
+        }
+        
+        # Try month'YY format first
+        for month_name, month_num in month_names.items():
+            pattern = rf"{month_name}'(\d{{2}})"
+            match = re.search(pattern, self.current_filename.lower())
+            if match:
+                year_suffix = int(match.group(1))
+                year = 2000 + year_suffix  # Convert 25 to 2025
+                print(f"DEBUG: Found month'YY format - Month: {month_name} ({month_num}), Year: {year}")
+                return year, month_num
+        
+        # Fallback: Try month abbreviations with apostrophe
+        month_abbrevs = {
+            'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+            'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
+        }
+        
+        for month_abbrev, month_num in month_abbrevs.items():
+            pattern = rf"{month_abbrev}'(\d{{2}})"
+            match = re.search(pattern, self.current_filename.lower())
+            if match:
+                year_suffix = int(match.group(1))
+                year = 2000 + year_suffix  # Convert 25 to 2025
+                print(f"DEBUG: Found abbrev'YY format - Month: {month_abbrev} ({month_num}), Year: {year}")
+                return year, month_num
+        
+        # Additional fallback: Try without apostrophe
+        for month_name, month_num in month_names.items():
+            pattern = rf"{month_name}(\d{{2}})"
+            match = re.search(pattern, self.current_filename.lower())
+            if match:
+                year_suffix = int(match.group(1))
+                year = 2000 + year_suffix
+                print(f"DEBUG: Found monthYY format - Month: {month_name} ({month_num}), Year: {year}")
+                return year, month_num
+        
+        print("DEBUG: No date pattern found in Aromateque filename, using defaults")
+        return 2025, 1  # Default if parsing fails
     
     async def _clean_generic_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
         transformations = []

@@ -12,19 +12,19 @@ Skins NL
 Looks Done
 
 Skins SA
-Not started
+Done
 
 Selfridges
 Not started, lack of report
 
 Boxnox
-Claude says its done, needs to be tested? 
+done
 
 CDLC
-Clade says its done, needs to be tested
+Done
 
 Galilu
 Not started yet
 
 Aromateque
-Not started yet
+Done

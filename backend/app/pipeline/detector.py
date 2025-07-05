@@ -21,10 +21,8 @@ class VendorDetector:
             return "cdlc"
         elif "continuity" in filename_lower:
             return "liberty"
-        elif "bibbi sales" in filename_lower:
-            return "ukraine"
         
-        # Check sheet names if available
+        # Check sheet names first for files that might have ambiguous patterns
         if hasattr(df, 'sheet_names'):
             sheet_names = [s.lower() for s in df.sheet_names]
             if any("sell out by ean" in s for s in sheet_names):
@@ -38,7 +36,15 @@ class VendorDetector:
                 else:
                     return "skins_sa"
             elif any("tdsheet" in s for s in sheet_names):
-                return "ukraine"
+                # Check if this is Aromateque (bibbi sales + TDSheet) vs Ukraine (just TDSheet)
+                if "bibbi sales" in filename_lower:
+                    return "aromateque"
+                else:
+                    return "ukraine"
+        
+        # Fallback filename patterns that weren't caught above
+        if "bibbi sales" in filename_lower:
+            return "ukraine"  # Default for bibbi sales without TDSheet
         
         # Default vendor if pattern not found
         return "unknown"
@@ -93,6 +99,12 @@ class VendorDetector:
                 "currency": "EUR",
                 "header_row": 0,
                 "pivot_format": False,
+                "date_columns": []
+            },
+            "aromateque": {
+                "currency": "EUR",
+                "header_row": 11,
+                "pivot_format": True,
                 "date_columns": []
             }
         }

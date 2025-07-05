@@ -33,9 +33,9 @@ class CleaningService:
             excel_file = pd.ExcelFile(io.BytesIO(file_contents))
             logger.info(f"Excel file sheet names: {excel_file.sheet_names}")
             
-            # First, detect vendor from filename to determine correct sheet
-            vendor = self.vendor_detector.detect_vendor(filename, pd.DataFrame())
-            logger.info(f"Detected vendor from filename: {vendor}")
+            # First, detect vendor from filename and sheet names to determine correct sheet
+            vendor = self.vendor_detector.detect_vendor(filename, excel_file)
+            logger.info(f"Detected vendor from filename and sheet names: {vendor}")
             
             # Select appropriate sheet based on vendor
             sheet_name = excel_file.sheet_names[0]  # Default to first sheet
@@ -50,7 +50,17 @@ class CleaningService:
                 sheet_name = next(name for name in excel_file.sheet_names if "sell out by ean" in name.lower())
                 logger.info(f"Found 'SELL OUT BY EAN' sheet for BOXNOX: {sheet_name}")
             
-            df = pd.read_excel(excel_file, sheet_name=sheet_name)
+            # For Aromateque, use TDSheet
+            elif vendor == "aromateque" and any("tdsheet" in name.lower() for name in excel_file.sheet_names):
+                sheet_name = next(name for name in excel_file.sheet_names if "tdsheet" in name.lower())
+                logger.info(f"Found 'TDSheet' sheet for Aromateque: {sheet_name}")
+            
+            # For Aromateque, read as text to prevent date auto-conversion
+            if vendor == "aromateque":
+                df = pd.read_excel(excel_file, sheet_name=sheet_name, dtype=str, header=None)
+                logger.info(f"Read Aromateque file as text to preserve Ukrainian headers")
+            else:
+                df = pd.read_excel(excel_file, sheet_name=sheet_name)
             logger.info(f"Loaded Excel sheet '{sheet_name}' with {len(df)} rows, columns: {list(df.columns)}")
             logger.info(f"First 3 rows preview: {df.head(3).to_dict('records')}")
             logger.info(f"Data types: {df.dtypes.to_dict()}")
@@ -67,8 +77,10 @@ class CleaningService:
             
             # Vendor already detected above
             logger.info(f"Using vendor: {vendor}")
+            logger.info(f"Vendor detection details - filename: '{filename}', sheet_names: {excel_file.sheet_names}")
             
             # Clean data
+            logger.info(f"Starting data cleaning for vendor '{vendor}' with {len(df)} rows")
             cleaned_df, transformations = await self.data_cleaner.clean_data(df, vendor, filename)
             logger.info(f"Cleaned {len(cleaned_df)} rows (original: {len(df)})")
             logger.info(f"Transformations applied: {len(transformations)}")
@@ -80,6 +92,7 @@ class CleaningService:
                 logger.warning("No rows left after cleaning!")
             
             # Normalize data
+            logger.info(f"Starting data normalization for vendor '{vendor}' with {len(cleaned_df)} cleaned rows")
             normalized_df = await self.data_normalizer.normalize_data(cleaned_df, vendor)
             logger.info(f"Normalized {len(normalized_df)} rows")
             if len(normalized_df) > 0:
