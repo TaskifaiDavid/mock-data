@@ -63,20 +63,236 @@ class DataCleaner:
     async def _clean_galilu_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
         transformations = []
         
-        # Skip rows with TOTAL
-        mask = ~df.iloc[:, 0].str.contains('TOTAL', case=False, na=False)
-        df = df[mask]
+        print(f"🔍 DEBUG: === GALILU DATA CLEANING START ===")
+        print(f"🔍 DEBUG: Input DataFrame shape: {df.shape}")
+        print(f"🔍 DEBUG: Input DataFrame columns: {list(df.columns)}")
+        print(f"🔍 DEBUG: Input DataFrame dtypes: {df.dtypes.to_dict()}")
         
-        # Unpivot monthly data
-        if len(df.columns) > 12:
-            # First column is store, rest are months
-            id_vars = [df.columns[0]]
-            value_vars = [col for col in df.columns[1:] if any(month in str(col).lower() for month in ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'])]
+        # Extract year from column headers or default to 2025
+        year = 2025
+        if len(df.columns) > 0:
+            first_col_name = str(df.columns[0]).strip()
+            if first_col_name.isdigit() and len(first_col_name) == 4:
+                year = int(first_col_name)
+                print(f"✅ DEBUG: Extracted year from column name: {year}")
+            else:
+                print(f"🔍 DEBUG: Using default year: {year}")
+        
+        # Find the "Total" column to identify the target month column
+        total_col_index = None
+        target_month_col = None
+        
+        print(f"🔍 DEBUG: === FINDING TOTAL COLUMN ===")
+        for i, col in enumerate(df.columns):
+            col_str = str(col).strip().lower()
+            print(f"🔍 DEBUG: Checking column {i}: '{col}' -> '{col_str}' -> contains 'total'? {'total' in col_str}")
+            if pd.notna(col) and 'total' in col_str:
+                total_col_index = i
+                print(f"✅ DEBUG: Found 'Total' column at index {i}: '{col}'")
+                break
+        
+        # If no Total column found in column names, check header row values
+        if total_col_index is None and len(df) > 0:
+            header_row = df.iloc[0]
+            print(f"🔍 DEBUG: No 'Total' in column names, checking header row values")
+            for i, val in enumerate(header_row):
+                val_str = str(val).strip().lower() if pd.notna(val) else ""
+                print(f"🔍 DEBUG: Checking header value {i}: '{val}' -> '{val_str}' -> contains 'total'? {'total' in val_str}")
+                if 'total' in val_str:
+                    total_col_index = i
+                    print(f"✅ DEBUG: Found 'Total' in header row at index {i}: '{val}'")
+                    break
+        
+        # Determine target month column and month number
+        month_mapping = {
+            'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+            'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+            'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5, 'june': 6,
+            'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12
+        }
+        
+        month = 5  # Default to May
+        
+        if total_col_index is not None and total_col_index > 0:
+            # The month column is the one to the left of Total
+            target_month_col_index = total_col_index - 1
+            target_month_col = df.columns[target_month_col_index]
+            print(f"✅ DEBUG: Target month column (left of Total): '{target_month_col}' at index {target_month_col_index}")
             
-            if value_vars:
-                df = pd.melt(df, id_vars=id_vars, value_vars=value_vars, var_name='month', value_name='quantity')
+            # Extract month number from column name
+            col_name_lower = str(target_month_col).lower()
+            print(f"🔍 DEBUG: Checking target month column name '{target_month_col}' -> '{col_name_lower}' for month")
+            
+            for month_name, month_num in month_mapping.items():
+                if month_name in col_name_lower:
+                    month = month_num
+                    print(f"✅ DEBUG: Extracted month from column name '{target_month_col}': {month} ({month_name})")
+                    break
+            else:
+                # Try header row value if available
+                if len(df) > 0:
+                    header_val = df.iloc[0, target_month_col_index] if target_month_col_index < len(df.columns) else None
+                    if pd.notna(header_val):
+                        header_val_lower = str(header_val).lower()
+                        print(f"🔍 DEBUG: Checking header value '{header_val}' -> '{header_val_lower}' for month")
+                        for month_name, month_num in month_mapping.items():
+                            if month_name in header_val_lower:
+                                month = month_num
+                                print(f"✅ DEBUG: Extracted month from header value '{header_val}': {month} ({month_name})")
+                                break
+                        else:
+                            print(f"⚠️ DEBUG: No month found in header value, using default: {month}")
+                    else:
+                        print(f"⚠️ DEBUG: Header value is NaN, using default month: {month}")
+        else:
+            print(f"⚠️ DEBUG: Could not find 'Total' column, using default month and guessing target column")
+            # From screenshot, May appears to be the last month column before Total
+            target_month_col_index = len(df.columns) - 2 if len(df.columns) > 1 else 0
+            target_month_col = df.columns[target_month_col_index] if target_month_col_index < len(df.columns) else df.columns[-1]
+            print(f"⚠️ DEBUG: Guessed target month column: '{target_month_col}' at index {target_month_col_index}")
         
-        return df, transformations
+        # Process all rows for the single target month column
+        processed_rows = []
+        
+        print(f"🔍 DEBUG: === ROW PROCESSING ===")
+        print(f"🔍 DEBUG: Target month: {month}, Target column: '{target_month_col}'")
+        print(f"🔍 DEBUG: Processing rows 1-{len(df)-1} (skipping header row 0)")
+        
+        # Start from row 1 (skip header row which is row 0)
+        for row_idx in range(1, len(df)):
+            row = df.iloc[row_idx]
+            print(f"🔍 DEBUG: --- Processing row {row_idx} ---")
+            print(f"🔍 DEBUG: Row {row_idx} data: {row.tolist()}")
+            
+            # Get product description from column A (first column)
+            product_description = row.iloc[0] if len(row) > 0 else None
+            print(f"🔍 DEBUG: Row {row_idx} product description (col A): '{product_description}'")
+            
+            if pd.isna(product_description) or str(product_description).strip() == '':
+                print(f"⚠️ DEBUG: Row {row_idx} SKIPPED - empty product description")
+                continue
+            
+            product_description_clean = str(product_description).strip()
+            
+            # Skip "Total" rows - these are summary rows, not actual products
+            if product_description_clean.lower() == 'total':
+                print(f"⚠️ DEBUG: Row {row_idx} SKIPPED - 'Total' row (summary data)")
+                continue
+            
+            # Get quantity from target month column
+            quantity = 0
+            if target_month_col in df.columns:
+                quantity_val = row[target_month_col]
+                print(f"🔍 DEBUG: Row {row_idx} quantity raw value from '{target_month_col}': '{quantity_val}' (type: {type(quantity_val)})")
+                
+                if pd.notna(quantity_val):
+                    try:
+                        quantity_str = str(quantity_val).strip()
+                        quantity = float(quantity_str) if quantity_str else 0
+                        print(f"✅ DEBUG: Row {row_idx} parsed quantity: {quantity}")
+                    except ValueError as e:
+                        print(f"⚠️ DEBUG: Row {row_idx} failed to parse quantity '{quantity_val}': {e}")
+                        quantity = 0
+                else:
+                    print(f"⚠️ DEBUG: Row {row_idx} quantity is NaN")
+            else:
+                print(f"⚠️ DEBUG: Row {row_idx} target column '{target_month_col}' not found in DataFrame")
+            
+            # Only include rows with positive quantity
+            print(f"🔍 DEBUG: Row {row_idx} final quantity: {quantity} -> Include? {quantity > 0}")
+            if quantity > 0:
+                # Map Polish product description to EAN using database lookup
+                print(f"🔍 DEBUG: Row {row_idx} mapping product '{product_description_clean}' to EAN")
+                product_ean = await self._map_galilu_product_to_ean(product_description_clean)
+                print(f"🔍 DEBUG: Row {row_idx} mapped EAN: '{product_ean}'")
+                
+                # Only include rows where we successfully mapped to an EAN
+                if product_ean and product_ean != 'None':
+                    row_data = {
+                        'reseller': 'Galilu',
+                        'product_ean': product_ean,
+                        'month': month,
+                        'year': year,
+                        'quantity': quantity,
+                        'sales_lc': None,  # Not available
+                        'currency': 'PLN',  # Fixed currency
+                        'functional_name': product_description_clean
+                    }
+                    
+                    processed_rows.append(row_data)
+                    print(f"✅ DEBUG: Row {row_idx} INCLUDED - {row_data}")
+                else:
+                    print(f"❌ DEBUG: Row {row_idx} EXCLUDED - no EAN mapping found for '{product_description_clean}'")
+            else:
+                print(f"❌ DEBUG: Row {row_idx} EXCLUDED - zero/negative quantity")
+        
+        # Create new DataFrame from processed rows
+        print(f"🔍 DEBUG: === FINAL RESULTS ===")
+        print(f"🔍 DEBUG: Total rows processed: {len(df)} (original) -> {len(processed_rows)} (cleaned)")
+        
+        if processed_rows:
+            df_cleaned = pd.DataFrame(processed_rows)
+            print(f"✅ DEBUG: Created cleaned DataFrame with {len(df_cleaned)} rows")
+            print(f"🔍 DEBUG: Cleaned DataFrame columns: {list(df_cleaned.columns)}")
+            print(f"🔍 DEBUG: Sample cleaned rows:")
+            for i, row in enumerate(processed_rows[:3]):
+                print(f"  Cleaned row {i}: {row}")
+        else:
+            df_cleaned = pd.DataFrame()
+            print(f"❌ DEBUG: No valid rows found, returning empty DataFrame")
+        
+        # Log transformations
+        transformations.append({
+            "row_index": 0,
+            "column_name": "single_month_processing",
+            "original_value": f"Pivot table with {len(df)} rows",
+            "cleaned_value": f"Extracted {len(processed_rows)} product entries for month {month}",
+            "transformation_type": "galilu_single_month_processing"
+        })
+        
+        transformations.append({
+            "row_index": 0,
+            "column_name": "year",
+            "original_value": "Column header detection",
+            "cleaned_value": year,
+            "transformation_type": "year_extraction"
+        })
+        
+        transformations.append({
+            "row_index": 0,
+            "column_name": "month",
+            "original_value": f"Column left of Total: {target_month_col}",
+            "cleaned_value": month,
+            "transformation_type": "month_extraction"
+        })
+        
+        print(f"🔍 DEBUG: === GALILU DATA CLEANING END ===")
+        return df_cleaned, transformations
+    
+    async def _map_galilu_product_to_ean(self, product_description: str) -> str:
+        """Map Polish product descriptions to EANs using database lookup via galilu_name column"""
+        print(f"🔍 MAPPING: === GALILU PRODUCT TO EAN MAPPING START ===")
+        print(f"🔍 MAPPING: Input product description: '{product_description}'")
+        
+        # Try database lookup using products.galilu_name column
+        if self.db_service:
+            print(f"🔍 MAPPING: Database service available, attempting galilu_name lookup")
+            try:
+                ean = await self.db_service.get_ean_by_galilu_name(product_description)
+                if ean:
+                    print(f"✅ MAPPING: Found EAN '{ean}' via galilu_name for '{product_description}'")
+                    return ean
+                else:
+                    print(f"⚠️ MAPPING: No EAN found via galilu_name for '{product_description}'")
+            except Exception as e:
+                print(f"❌ MAPPING: Database galilu_name lookup failed for '{product_description}': {e}")
+        else:
+            print(f"⚠️ MAPPING: No database service available, skipping galilu_name lookup")
+        
+        # If no match found, return None (no more hardcoded fallback)
+        print(f"❌ MAPPING: No EAN mapping found for Galilu product '{product_description}' via galilu_name column")
+        print(f"🔍 MAPPING: Consider adding galilu_name mapping in products table: galilu_name='{product_description}' -> functional_name=[PRODUCT_NAME]")
+        return None
     
     async def _clean_boxnox_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
         transformations = []

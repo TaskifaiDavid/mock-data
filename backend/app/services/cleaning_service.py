@@ -36,24 +36,70 @@ class CleaningService:
             # First, detect vendor from filename and sheet names to determine correct sheet
             vendor = self.vendor_detector.detect_vendor(filename, excel_file)
             logger.info(f"Detected vendor from filename and sheet names: {vendor}")
+            logger.info(f"Available sheets: {excel_file.sheet_names}")
             
             # Select appropriate sheet based on vendor
             sheet_name = excel_file.sheet_names[0]  # Default to first sheet
+            logger.info(f"Default sheet selection: '{sheet_name}' (first sheet)")
             
             # For Skins NL, try to find SalesPerSKU sheet if available
-            if vendor == "skins_nl" and any("salespersku" in name.lower() for name in excel_file.sheet_names):
-                sheet_name = next(name for name in excel_file.sheet_names if "salespersku" in name.lower())
-                logger.info(f"Found SalesPerSKU sheet for Skins NL: {sheet_name}")
+            if vendor == "skins_nl":
+                logger.info("Processing Skins NL - looking for SalesPerSKU sheet")
+                matching_sheets = [name for name in excel_file.sheet_names if "salespersku" in name.lower()]
+                logger.info(f"SalesPerSKU matching sheets: {matching_sheets}")
+                if matching_sheets:
+                    sheet_name = matching_sheets[0]
+                    logger.info(f"Found SalesPerSKU sheet for Skins NL: {sheet_name}")
+                else:
+                    logger.info(f"No SalesPerSKU sheet found, using default: {sheet_name}")
             
             # For BOXNOX, try to find "SELL OUT BY EAN" sheet if available
-            elif vendor == "boxnox" and any("sell out by ean" in name.lower() for name in excel_file.sheet_names):
-                sheet_name = next(name for name in excel_file.sheet_names if "sell out by ean" in name.lower())
-                logger.info(f"Found 'SELL OUT BY EAN' sheet for BOXNOX: {sheet_name}")
+            elif vendor == "boxnox":
+                logger.info("Processing BOXNOX - looking for 'SELL OUT BY EAN' sheet")
+                matching_sheets = [name for name in excel_file.sheet_names if "sell out by ean" in name.lower()]
+                logger.info(f"SELL OUT BY EAN matching sheets: {matching_sheets}")
+                if matching_sheets:
+                    sheet_name = matching_sheets[0]
+                    logger.info(f"Found 'SELL OUT BY EAN' sheet for BOXNOX: {sheet_name}")
+                else:
+                    logger.info(f"No 'SELL OUT BY EAN' sheet found, using default: {sheet_name}")
             
             # For Aromateque, use TDSheet
-            elif vendor == "aromateque" and any("tdsheet" in name.lower() for name in excel_file.sheet_names):
-                sheet_name = next(name for name in excel_file.sheet_names if "tdsheet" in name.lower())
-                logger.info(f"Found 'TDSheet' sheet for Aromateque: {sheet_name}")
+            elif vendor == "aromateque":
+                logger.info("Processing Aromateque - looking for TDSheet")
+                matching_sheets = [name for name in excel_file.sheet_names if "tdsheet" in name.lower()]
+                logger.info(f"TDSheet matching sheets: {matching_sheets}")
+                if matching_sheets:
+                    sheet_name = matching_sheets[0]
+                    logger.info(f"Found 'TDSheet' sheet for Aromateque: {sheet_name}")
+                else:
+                    logger.info(f"No TDSheet found, using default: {sheet_name}")
+            
+            # For Galilu, try to find "product_ranking_2025" sheet if available
+            elif vendor == "galilu":
+                logger.info("Processing Galilu - looking for 'product_ranking_2025' sheet")
+                logger.info(f"Checking each sheet for Galilu pattern:")
+                for i, name in enumerate(excel_file.sheet_names):
+                    logger.info(f"  Sheet {i}: '{name}' - contains 'product_ranking_2025'? {'product_ranking_2025' in name.lower()}")
+                
+                matching_sheets = [name for name in excel_file.sheet_names if "product_ranking_2025" in name.lower()]
+                logger.info(f"Galilu product_ranking_2025 matching sheets: {matching_sheets}")
+                
+                if matching_sheets:
+                    sheet_name = matching_sheets[0]
+                    logger.info(f"✅ Found 'product_ranking_2025' sheet for Galilu: '{sheet_name}'")
+                else:
+                    logger.warning(f"⚠️ No 'product_ranking_2025' sheet found for Galilu, using default: '{sheet_name}'")
+                    # Try alternative patterns
+                    alt_patterns = ["product_ranking", "ranking_2025", "product ranking"]
+                    for pattern in alt_patterns:
+                        alt_matching = [name for name in excel_file.sheet_names if pattern in name.lower()]
+                        if alt_matching:
+                            sheet_name = alt_matching[0]
+                            logger.info(f"🔄 Found alternative Galilu sheet with pattern '{pattern}': '{sheet_name}'")
+                            break
+                    else:
+                        logger.warning(f"🚨 No alternative Galilu sheet patterns found, proceeding with default: '{sheet_name}'")
             
             # For Aromateque, read as text to prevent date auto-conversion
             if vendor == "aromateque":

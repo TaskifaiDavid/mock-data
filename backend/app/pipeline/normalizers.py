@@ -74,7 +74,7 @@ class DataNormalizer:
                 normalized_df['sku_temp'] = df['sku']
         
         # Special handling for sales_lc - preserve raw value from local currency
-        if vendor in ['liberty', 'skins_nl', 'cdlc'] and 'sales_lc' in df.columns:
+        if vendor in ['liberty', 'skins_nl', 'cdlc', 'galilu'] and 'sales_lc' in df.columns:
             # Keep the raw sales_lc value as text (don't convert to EUR)
             normalized_df['sales_lc'] = df['sales_lc'].astype(str)
             print(f"DEBUG: Preserved sales_lc for {vendor}: {normalized_df['sales_lc'].head().tolist()}")
@@ -94,6 +94,8 @@ class DataNormalizer:
             normalized_df['reseller'] = 'Creme de la Creme'  # CDLC files are for Creme de la Creme reseller
         elif vendor == 'aromateque':
             normalized_df['reseller'] = 'Aromateque'  # Preserve proper capitalization
+        elif vendor == 'galilu':
+            normalized_df['reseller'] = 'Galilu'  # Proper capitalization for Galilu
         else:
             normalized_df['reseller'] = vendor.replace('_', ' ').title()
         
@@ -119,7 +121,7 @@ class DataNormalizer:
         # Handle sales_lc (sales in local currency)
         # If we have both EUR and local currency, use local currency value as sales_lc
         # Skip this for vendors that already handled sales_lc above
-        if vendor not in ['liberty', 'skins_nl', 'skins_sa'] and 'sales_eur' in normalized_df.columns and normalized_df['currency'].notna().any():
+        if vendor not in ['liberty', 'skins_nl', 'skins_sa', 'galilu'] and 'sales_eur' in normalized_df.columns and normalized_df['currency'].notna().any():
             # Convert sales_eur to string, but handle NaN values properly
             normalized_df['sales_lc'] = normalized_df['sales_eur'].apply(
                 lambda x: None if pd.isna(x) else str(x)
@@ -160,6 +162,10 @@ class DataNormalizer:
                 # For Aromateque, preserve uppercase functional_name (set in cleaner)
                 normalized_df['functional_name'] = normalized_df['functional_name'].str.strip().str.upper()
                 print("DEBUG: Preserved uppercase functional_name for Aromateque data")
+            elif vendor == 'galilu':
+                # For Galilu, preserve original Polish product descriptions (no case conversion)
+                normalized_df['functional_name'] = normalized_df['functional_name'].str.strip()
+                print("DEBUG: Preserved original case for Galilu Polish product descriptions")
             else:
                 # For other vendors, apply title case as before
                 normalized_df['functional_name'] = normalized_df['functional_name'].str.strip().str.title()

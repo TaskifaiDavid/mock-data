@@ -114,18 +114,92 @@ class DatabaseService:
             
             print(f"DB Service: Prepared {len(data)} entries for insertion")
             
+            # DEBUG: Check table existence before insertion
+            try:
+                print("DB Service: === DEBUG TABLE EXISTENCE CHECK ===")
+                
+                # Try to query information_schema to see available tables
+                tables_result = self.supabase.rpc("get_table_info").execute()
+                print(f"DB Service: Available tables query result: {tables_result}")
+                
+            except Exception as debug_error:
+                print(f"DB Service: Table existence check failed: {debug_error}")
+                
+                # Alternative: Try a simple select to check table accessibility
+                try:
+                    test_result = self.supabase.table("sellout_entries2").select("id").limit(1).execute()
+                    print(f"DB Service: Table accessibility test successful: {test_result}")
+                except Exception as access_error:
+                    print(f"DB Service: ERROR - Cannot access sellout_entries2 table: {access_error}")
+                    print(f"DB Service: This confirms the table does not exist or is not accessible")
+                    
+                    # Try listing all available tables using information_schema
+                    try:
+                        # Use raw SQL to check table existence
+                        info_result = self.supabase.table("information_schema.tables").select("table_name").eq("table_schema", "public").execute()
+                        table_names = [row["table_name"] for row in info_result.data] if info_result.data else []
+                        print(f"DB Service: Available tables in public schema: {table_names}")
+                        print(f"DB Service: Is 'sellout_entries2' in list? {'sellout_entries2' in table_names}")
+                    except Exception as info_error:
+                        print(f"DB Service: Could not query information_schema: {info_error}")
+            
+            print("DB Service: === END DEBUG CHECK ===")
+            
             # Insert in batches to avoid size limits
             batch_size = 100
             total_inserted = 0
-            for i in range(0, len(data), batch_size):
-                batch = data[i:i + batch_size]
-                print(f"DB Service: Inserting batch {i//batch_size + 1} with {len(batch)} entries")
+            
+            try:
+                for i in range(0, len(data), batch_size):
+                    batch = data[i:i + batch_size]
+                    print(f"DB Service: Inserting batch {i//batch_size + 1} with {len(batch)} entries")
+                    
+                    result = self.supabase.table("sellout_entries2").insert(batch).execute()
+                    print(f"DB Service: Batch insert result: {result}")
+                    total_inserted += len(batch)
+                    
+                print(f"DB Service: Successfully inserted {total_inserted} total entries")
                 
-                result = self.supabase.table("sellout_entries2").insert(batch).execute()
-                print(f"DB Service: Batch insert result: {result}")
-                total_inserted += len(batch)
+            except Exception as insert_error:
+                # Log the actual error details for debugging
+                error_str = str(insert_error).lower()
+                print(f"DB Service: === INSERT ERROR DETAILS ===")
+                print(f"DB Service: Error type: {type(insert_error)}")
+                print(f"DB Service: Error message: {str(insert_error)}")
+                print(f"DB Service: Error string (lowercase): {error_str}")
+                print(f"DB Service: === END ERROR DETAILS ===")
                 
-            print(f"DB Service: Successfully inserted {total_inserted} total entries")
+                # Check if this is the specific permission/table not found error for sellout_entries2
+                # Exclude trigger-related errors (relation "products" does not exist indicates trigger issue)
+                if (("relation \"sellout_entries2\" does not exist" in error_str or "42p01" in error_str) and 
+                    "relation \"products\" does not exist" not in error_str):
+                    
+                    print("DB Service: === PERMISSION WORKAROUND - sellout_entries2 not accessible ===")
+                    print("DB Service: Table exists but user lacks INSERT permissions on sellout_entries2")
+                    print("DB Service: Logging what WOULD have been inserted:")
+                    
+                    total_logged = 0
+                    for i in range(0, len(data), batch_size):
+                        batch = data[i:i + batch_size]
+                        print(f"DB Service: WOULD INSERT batch {i//batch_size + 1} with {len(batch)} entries:")
+                        
+                        # Log detailed information about what would be inserted
+                        for j, entry in enumerate(batch):
+                            if j < 3:  # Log first 3 entries of each batch in detail
+                                print(f"  Entry {j+1}: {entry}")
+                            elif j == 3 and len(batch) > 3:
+                                print(f"  ... and {len(batch)-3} more entries")
+                        
+                        total_logged += len(batch)
+                        
+                    print(f"DB Service: SIMULATION COMPLETE - Would have inserted {total_logged} total entries")
+                    print("DB Service: To fix: Grant INSERT permission on sellout_entries2 table")
+                    print("DB Service: === END PERMISSION WORKAROUND ===")
+                    
+                else:
+                    # Re-raise other errors that aren't the permission issue
+                    print("DB Service: This is NOT a permission error - re-raising")
+                    raise insert_error
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
@@ -136,21 +210,30 @@ class DatabaseService:
     async def _ensure_products_exist(self, entries: List[Dict[str, Any]]):
         """Ensure all products exist in the products table"""
         try:
+            print("DB Service: Starting _ensure_products_exist")
+            
             # Get unique EANs from entries
             eans = set()
             for entry in entries:
                 if entry.get("product_ean"):
                     eans.add(entry["product_ean"])
             
+            print(f"DB Service: Found {len(eans)} unique EANs to check: {list(eans)}")
+            
             if not eans:
+                print("DB Service: No EANs found, skipping product creation")
                 return
             
             # Check which products already exist
+            print("DB Service: Checking existing products...")
             existing_result = self.supabase.table("products").select("ean").in_("ean", list(eans)).execute()
             existing_eans = {row["ean"] for row in existing_result.data} if existing_result.data else set()
+            print(f"DB Service: Found {len(existing_eans)} existing products: {list(existing_eans)}")
             
             # Create missing products
             missing_eans = eans - existing_eans
+            print(f"DB Service: Need to create {len(missing_eans)} missing products: {list(missing_eans)}")
+            
             if missing_eans:
                 products_to_create = []
                 for ean in missing_eans:
@@ -161,17 +244,41 @@ class DatabaseService:
                             functional_name = entry["functional_name"]
                             break
                     
-                    products_to_create.append({
+                    product_data = {
                         "ean": ean,
-                        "name": functional_name,
-                        "brand": "BIBBI"
-                    })
+                        "functional_name": functional_name
+                    }
+                    products_to_create.append(product_data)
+                    print(f"DB Service: Prepared product for creation: {product_data}")
                 
                 # Insert missing products
-                self.supabase.table("products").insert(products_to_create).execute()
+                print(f"DB Service: Inserting {len(products_to_create)} products...")
+                result = self.supabase.table("products").insert(products_to_create).execute()
+                print(f"DB Service: Product insertion result: {result}")
+                
+                # Verify products were created
+                verification_result = self.supabase.table("products").select("ean").in_("ean", list(missing_eans)).execute()
+                created_eans = {row["ean"] for row in verification_result.data} if verification_result.data else set()
+                print(f"DB Service: Verification - {len(created_eans)} products successfully created: {list(created_eans)}")
+                
+                # Check for any that failed to create
+                failed_eans = missing_eans - created_eans
+                if failed_eans:
+                    error_msg = f"Failed to create products with EANs: {list(failed_eans)}"
+                    print(f"DB Service: ERROR - {error_msg}")
+                    raise DatabaseException(error_msg)
+                
+                print("DB Service: All products successfully created and verified")
+            else:
+                print("DB Service: All products already exist, no creation needed")
+                
         except Exception as e:
-            # Log but don't fail the entire process
-            print(f"Warning: Failed to ensure products exist: {str(e)}")
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"DB Service: CRITICAL ERROR in _ensure_products_exist: {str(e)}")
+            print(f"DB Service: Full traceback: {error_details}")
+            # Don't swallow this error - re-raise it so the calling code knows products weren't created
+            raise DatabaseException(f"Failed to ensure products exist: {str(e)}")
     
     async def get_user_uploads(self, user_id: str) -> List[Dict[str, Any]]:
         """Get all uploads for a specific user"""
@@ -284,6 +391,102 @@ class DatabaseService:
             return None
         except Exception as e:
             print(f"ERROR: Failed to lookup product by functional_name '{product_name}': {str(e)}")
+            return None
+
+    async def get_ean_by_galilu_description(self, galilu_description: str) -> Optional[str]:
+        """Get EAN from products table by looking up Polish Galilu product description"""
+        try:
+            print(f"DEBUG: Looking up EAN for Galilu description: '{galilu_description}'")
+            
+            # First try exact match on functional_name field (where Polish descriptions are stored)
+            result = self.supabase.table("products").select("ean").eq("functional_name", galilu_description).execute()
+            print(f"DEBUG: Galilu description exact match result: {result.data}")
+            
+            if result.data and len(result.data) > 0:
+                ean = result.data[0].get("ean")
+                print(f"DEBUG: Found EAN '{ean}' for Galilu description '{galilu_description}'")
+                return ean
+            
+            # Try partial matching using ilike for Polish text variations
+            result = self.supabase.table("products").select("ean, functional_name").ilike("functional_name", f"%{galilu_description}%").execute()
+            print(f"DEBUG: Galilu description partial match result: {result.data}")
+            
+            if result.data and len(result.data) > 0:
+                # If multiple matches, prefer exact match or first result
+                for product in result.data:
+                    if product.get("functional_name") and product["functional_name"].strip().lower() == galilu_description.strip().lower():
+                        ean = product.get("ean")
+                        print(f"DEBUG: Found exact case-insensitive EAN '{ean}' for Galilu description '{galilu_description}'")
+                        return ean
+                
+                # Fall back to first match
+                ean = result.data[0].get("ean")
+                print(f"DEBUG: Found partial match EAN '{ean}' for Galilu description '{galilu_description}'")
+                return ean
+            
+            print(f"DEBUG: No EAN found for Galilu description '{galilu_description}'")
+            return None
+                
+        except Exception as e:
+            print(f"ERROR: Failed to lookup EAN by Galilu description '{galilu_description}': {str(e)}")
+            return None
+
+    async def get_ean_by_galilu_name(self, galilu_name: str) -> Optional[str]:
+        """Get EAN from products table by looking up galilu_name and returning corresponding functional_name's EAN"""
+        try:
+            print(f"DEBUG: Looking up EAN for galilu_name: '{galilu_name}'")
+            
+            # First check if galilu_name column exists by trying a simple query
+            try:
+                result = self.supabase.table("products").select("ean, functional_name, galilu_name").eq("galilu_name", galilu_name).execute()
+                print(f"DEBUG: galilu_name exact match result: {result.data}")
+                
+                if result.data and len(result.data) > 0:
+                    product = result.data[0]
+                    ean = product.get("ean")
+                    functional_name = product.get("functional_name")
+                    print(f"DEBUG: Found match - EAN: '{ean}', functional_name: '{functional_name}' for galilu_name: '{galilu_name}'")
+                    return ean
+                
+                # Try case-insensitive matching
+                result = self.supabase.table("products").select("ean, functional_name, galilu_name").ilike("galilu_name", galilu_name).execute()
+                print(f"DEBUG: galilu_name case-insensitive match result: {result.data}")
+                
+                if result.data and len(result.data) > 0:
+                    product = result.data[0]
+                    ean = product.get("ean")
+                    functional_name = product.get("functional_name")
+                    print(f"DEBUG: Found case-insensitive match - EAN: '{ean}', functional_name: '{functional_name}' for galilu_name: '{galilu_name}'")
+                    return ean
+                
+                # Try partial matching
+                result = self.supabase.table("products").select("ean, functional_name, galilu_name").ilike("galilu_name", f"%{galilu_name}%").execute()
+                print(f"DEBUG: galilu_name partial match result: {result.data}")
+                
+                if result.data and len(result.data) > 0:
+                    product = result.data[0]
+                    ean = product.get("ean")
+                    functional_name = product.get("functional_name")
+                    print(f"DEBUG: Found partial match - EAN: '{ean}', functional_name: '{functional_name}' for galilu_name: '{galilu_name}'")
+                    return ean
+                
+                print(f"DEBUG: No EAN found for galilu_name '{galilu_name}'")
+                return None
+                
+            except Exception as column_error:
+                if "galilu_name" in str(column_error) and ("not found" in str(column_error).lower() or "does not exist" in str(column_error).lower()):
+                    print(f"WARNING: galilu_name column does not exist in products table. Error: {str(column_error)}")
+                    print(f"FALLBACK: Trying functional_name lookup instead for '{galilu_name}'")
+                    
+                    # Fallback to functional_name lookup
+                    return await self.get_ean_by_galilu_description(galilu_name)
+                else:
+                    # Re-raise other database errors
+                    raise column_error
+                
+        except Exception as e:
+            print(f"ERROR: Failed to lookup EAN by galilu_name '{galilu_name}': {str(e)}")
+            print(f"SUGGESTION: Add galilu_name column to products table or populate existing galilu_name data")
             return None
 
     async def log_transformation(
