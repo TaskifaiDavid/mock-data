@@ -17,7 +17,7 @@ function Dashboard({ user, onLogout }) {
   return (
     <div className="dashboard">
       <header className="dashboard-header">
-        <h1>Data Pipeline</h1>
+        <h1>BIBBI</h1>
         <div className="user-info">
           <span>{user?.email || 'Unknown User'}</span>
           <button onClick={handleLogout} className="logout-btn btn-secondary">
@@ -31,7 +31,7 @@ function Dashboard({ user, onLogout }) {
           className={activeView === 'upload' ? 'active' : ''}
           onClick={() => setActiveView('upload')}
         >
-          Upload File
+          Upload Files
         </button>
         <button
           className={activeView === 'status' ? 'active' : ''}
@@ -39,13 +39,24 @@ function Dashboard({ user, onLogout }) {
         >
           Processing Status
         </button>
+        <button
+          className={activeView === 'analytics' ? 'active' : ''}
+          onClick={() => setActiveView('analytics')}
+        >
+          Analytics
+        </button>
       </nav>
 
       <main className="dashboard-content">
         {activeView === 'upload' ? (
           <Upload />
-        ) : (
+        ) : activeView === 'status' ? (
           <StatusList />
+        ) : (
+          <div className="analytics-placeholder">
+            <h2>Analytics Dashboard</h2>
+            <p className="coming-soon">Advanced analytics and insights coming soon...</p>
+          </div>
         )}
       </main>
     </div>

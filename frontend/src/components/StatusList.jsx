@@ -40,7 +40,7 @@ function StatusList() {
   }
 
   if (loading) {
-    return <div className="loading">Loading uploads...</div>
+    return <div className="loading">Loading processing status...</div>
   }
 
   return (

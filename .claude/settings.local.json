@@ -12,7 +12,8 @@
       "Bash(journalctl:*)",
       "Bash(grep:*)",
       "Bash(curl:*)",
-      "Bash(rg:*)"
+      "Bash(rg:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": []
   }

@@ -62,8 +62,8 @@ function Login({ onLoginSuccess }) {
   return (
     <div className="login-container">
       <div className="login-box">
-        <h1>Data Pipeline</h1>
-        <h2>Login</h2>
+        <h1>BIBBI</h1>
+        <h2>Admin Portal</h2>
         
         <form onSubmit={handleLogin}>
           <div className="form-group">

@@ -104,7 +104,7 @@ function Upload() {
 
   return (
     <div className="upload-container">
-      <h2>Upload Excel Files</h2>
+      <h2>Upload Data Files</h2>
       
       {/* Upload Mode Toggle */}
       <div className="upload-mode-toggle">
