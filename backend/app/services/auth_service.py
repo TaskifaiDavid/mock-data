@@ -1,9 +1,11 @@
 from supabase import create_client, Client
 from app.utils.config import get_settings
 from app.utils.exceptions import AuthenticationException
-from app.models.auth import UserLogin, UserRegister, UserResponse, TokenResponse
+from app.models.auth import UserLogin, UserRegister, UserResponse, TokenResponse, UserInDB
 from typing import Optional
 import logging
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 class AuthService:
     def __init__(self):
@@ -109,3 +111,43 @@ class AuthService:
             return True
         except Exception:
             return False
+
+# Create a global auth service instance
+auth_service = AuthService()
+
+# HTTP Bearer token security
+security = HTTPBearer()
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> UserInDB:
+    """
+    FastAPI dependency to get the current authenticated user from JWT token
+    """
+    try:
+        # Extract token from credentials
+        token = credentials.credentials
+        
+        # Verify token using auth service
+        user_data = await auth_service.verify_token(token)
+        
+        if not user_data:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Convert to UserInDB model
+        return UserInDB(
+            id=user_data["id"],
+            email=user_data["email"],
+            created_at=user_data.get("created_at")
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )

@@ -19,3 +19,8 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
+
+class UserInDB(BaseModel):
+    id: str
+    email: str
+    created_at: Optional[datetime] = None

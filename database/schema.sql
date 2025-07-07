@@ -140,3 +140,45 @@ CREATE POLICY "Anyone can view products" ON public.products
 -- Service role can manage products
 CREATE POLICY "Service role can manage products" ON public.products
   FOR ALL USING (auth.role() = 'service_role');
+
+-- RPC function to execute raw SQL queries (for chat functionality)
+-- This function allows the chat service to execute complex SQL queries
+-- while maintaining security through RLS policies
+CREATE OR REPLACE FUNCTION execute_sql_query(query_text text)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  result jsonb;
+  rec record;
+  results jsonb[] := '{}';
+BEGIN
+  -- Security: Only allow SELECT statements
+  IF NOT (upper(trim(query_text)) LIKE 'SELECT%') THEN
+    RAISE EXCEPTION 'Only SELECT statements are allowed';
+  END IF;
+  
+  -- Security: Block dangerous keywords
+  IF upper(query_text) ~ '(DROP|DELETE|UPDATE|INSERT|ALTER|CREATE|GRANT|REVOKE|EXEC|EXECUTE)' THEN
+    RAISE EXCEPTION 'Dangerous SQL keywords are not allowed';
+  END IF;
+  
+  -- Execute the query and collect results
+  FOR rec IN EXECUTE query_text LOOP
+    results := results || to_jsonb(rec);
+  END LOOP;
+  
+  -- Return results as JSON
+  RETURN array_to_json(results)::jsonb;
+  
+EXCEPTION
+  WHEN OTHERS THEN
+    -- Return error information
+    RETURN jsonb_build_object(
+      'error', true,
+      'message', SQLERRM,
+      'state', SQLSTATE
+    );
+END;
+$$;

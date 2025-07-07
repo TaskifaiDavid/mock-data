@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bibbi Cleaner Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .content {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .metadata {
+            background-color: #e8f4f8;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .metadata h3 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        .metadata-item {
+            margin: 8px 0;
+        }
+        .metadata-label {
+            font-weight: bold;
+            color: #34495e;
+        }
+        .footer {
+            text-align: center;
+            color: #7f8c8d;
+            font-size: 12px;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #ecf0f1;
+        }
+        .success {
+            color: #27ae60;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Bibbi Cleaner Report</h1>
+        <p>{{ report_type.replace('_', ' ').title() }}</p>
+    </div>
+    
+    <div class="content">
+        <h2>Data Cleaning Report</h2>
+        <p>Your data cleaning process has been completed successfully. Please find the attached report with detailed information about the cleaning operations performed.</p>
+        
+        {% if metadata %}
+        <div class="metadata">
+            <h3>Processing Summary</h3>
+            {% if metadata.cleanedRows %}
+            <div class="metadata-item">
+                <span class="metadata-label">Rows Cleaned:</span> {{ metadata.cleanedRows }}
+            </div>
+            {% endif %}
+            {% if metadata.totalValue %}
+            <div class="metadata-item">
+                <span class="metadata-label">Total Value:</span> {{ metadata.totalValue }} {{ metadata.currency or 'EUR' }}
+            </div>
+            {% endif %}
+            {% if metadata.reseller %}
+            <div class="metadata-item">
+                <span class="metadata-label">Reseller:</span> {{ metadata.reseller }}
+            </div>
+            {% endif %}
+            {% if metadata.processingTime %}
+            <div class="metadata-item">
+                <span class="metadata-label">Processing Time:</span> {{ metadata.processingTime }}ms
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+        
+        <p class="success">Processing completed successfully!</p>
+        
+        <p>The attached files contain the cleaned data and processing logs. Please review the results and contact support if you have any questions.</p>
+    </div>
+    
+    <div class="footer">
+        <p>Generated on {{ timestamp }}</p>
+        <p>Bibbi Cleaner System v2.0</p>
+        <p>This is an automated message from the Bibbi data cleaning pipeline.</p>
+    </div>
+</body>
+</html>

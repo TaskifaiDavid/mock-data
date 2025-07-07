@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react'
-import StatusItem from './StatusItem'
 import api from '../services/api'
 
 function StatusList() {
@@ -43,6 +42,28 @@ function StatusList() {
     return <div className="loading">Loading processing status...</div>
   }
 
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'completed':
+        return 'status-success'
+      case 'failed':
+        return 'status-error'
+      case 'processing':
+        return 'status-processing'
+      default:
+        return 'status-pending'
+    }
+  }
+
+  const formatDate = (dateString) => {
+    return new Date(dateString).toLocaleString()
+  }
+
+  const formatDuration = (ms) => {
+    if (!ms) return 'N/A'
+    return `${(ms / 1000).toFixed(2)}s`
+  }
+
   return (
     <div className="status-list">
       <h2>Processing Status</h2>
@@ -54,10 +75,45 @@ function StatusList() {
       {uploads.length === 0 ? (
         <p className="no-uploads">No uploads yet. Upload a file to get started!</p>
       ) : (
-        <div className="uploads-grid">
-          {uploads.map((upload) => (
-            <StatusItem key={upload.id} upload={upload} />
-          ))}
+        <div className="status-table-container">
+          <table className="status-table">
+            <thead>
+              <tr>
+                <th>File Name</th>
+                <th>Status</th>
+                <th>Uploaded</th>
+                <th>Rows Processed</th>
+                <th>Rows Cleaned</th>
+                <th>Processing Time</th>
+                <th>Error</th>
+              </tr>
+            </thead>
+            <tbody>
+              {uploads.map((upload) => (
+                <tr key={upload.id}>
+                  <td className="filename">{upload.filename}</td>
+                  <td>
+                    <span className={`status-badge ${getStatusColor(upload.status)}`}>
+                      {upload.status}
+                    </span>
+                  </td>
+                  <td>{formatDate(upload.uploaded_at)}</td>
+                  <td>{upload.rows_processed || '-'}</td>
+                  <td>{upload.rows_cleaned || '-'}</td>
+                  <td>{formatDuration(upload.processing_time_ms)}</td>
+                  <td className="error-cell">
+                    {upload.status === 'failed' && upload.error_message ? (
+                      <span className="error-message" title={upload.error_message}>
+                        {upload.error_message.length > 50 
+                          ? `${upload.error_message.substring(0, 50)}...` 
+                          : upload.error_message}
+                      </span>
+                    ) : '-'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

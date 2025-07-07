@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import Upload from '../components/Upload'
 import StatusList from '../components/StatusList'
+import ChatInterface from '../components/ChatInterface'
+import AnalyticsDashboard from '../components/AnalyticsDashboard'
 
 function Dashboard({ user, onLogout }) {
   const [activeView, setActiveView] = useState('upload')
@@ -26,39 +28,46 @@ function Dashboard({ user, onLogout }) {
         </div>
       </header>
 
-      <nav className="dashboard-nav">
-        <button
-          className={activeView === 'upload' ? 'active' : ''}
-          onClick={() => setActiveView('upload')}
-        >
-          Upload Files
-        </button>
-        <button
-          className={activeView === 'status' ? 'active' : ''}
-          onClick={() => setActiveView('status')}
-        >
-          Processing Status
-        </button>
-        <button
-          className={activeView === 'analytics' ? 'active' : ''}
-          onClick={() => setActiveView('analytics')}
-        >
-          Analytics
-        </button>
-      </nav>
+      <div className="dashboard-main">
+        <nav className="dashboard-nav">
+          <button
+            className={activeView === 'upload' ? 'active' : ''}
+            onClick={() => setActiveView('upload')}
+          >
+            Upload Files
+          </button>
+          <button
+            className={activeView === 'status' ? 'active' : ''}
+            onClick={() => setActiveView('status')}
+          >
+            Processing Status
+          </button>
+          <button
+            className={activeView === 'chat' ? 'active' : ''}
+            onClick={() => setActiveView('chat')}
+          >
+            Chat
+          </button>
+          <button
+            className={activeView === 'analytics' ? 'active' : ''}
+            onClick={() => setActiveView('analytics')}
+          >
+            Analytics
+          </button>
+        </nav>
 
-      <main className="dashboard-content">
+        <main className="dashboard-content">
         {activeView === 'upload' ? (
           <Upload />
         ) : activeView === 'status' ? (
           <StatusList />
+        ) : activeView === 'chat' ? (
+          <ChatInterface />
         ) : (
-          <div className="analytics-placeholder">
-            <h2>Analytics Dashboard</h2>
-            <p className="coming-soon">Advanced analytics and insights coming soon...</p>
-          </div>
+          <AnalyticsDashboard />
         )}
-      </main>
+        </main>
+      </div>
     </div>
   )
 }
