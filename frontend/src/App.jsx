@@ -2,8 +2,6 @@ import React, { useState, useEffect } from 'react'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -30,7 +28,7 @@ function App() {
 
       console.log('🔗 Validating token with backend...')
       // Validate token with backend
-      const response = await fetch(`${API_URL}/api/auth/debug-token`, {
+      const response = await fetch('http://localhost:8000/api/auth/debug-token', {
         headers: {
           'Authorization': `Bearer ${token}`
         }
