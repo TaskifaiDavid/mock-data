@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from app.api import auth, upload, status, email, chat, dashboard
+from app.api import auth, upload, status, email, chat, dashboard, webhook
 from app.utils.config import get_settings
 from app.utils.exceptions import AppException
 import logging
@@ -44,6 +44,7 @@ app.include_router(status.router, prefix="/api")
 app.include_router(email.router, prefix="/api")
 app.include_router(chat.router, prefix="/api/chat")
 app.include_router(dashboard.router, prefix="/api/dashboards")
+app.include_router(webhook.router, prefix="/api")
 
 @app.get("/")
 async def root():

@@ -15,7 +15,10 @@
       "Bash(rg:*)",
       "Bash(npm run build:*)",
       "Bash(source:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(chmod:*)",
+      "Bash(npm run dev:*)",
+      "Bash(kill:*)"
     ],
     "deny": []
   }

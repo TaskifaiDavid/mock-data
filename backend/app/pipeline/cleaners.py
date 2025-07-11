@@ -9,6 +9,32 @@ class DataCleaner:
         self.current_filename = None
         self.db_service = db_service
     
+    def _clean_numeric_value(self, value):
+        """Standardized numeric cleaning for sales_lc values"""
+        if pd.isna(value) or value == '':
+            return None
+        
+        # Convert to string for processing
+        clean_value = str(value).strip()
+        
+        # Replace em-dash, en-dash, and Unicode minus with ASCII hyphen
+        clean_value = re.sub(r'[\u2013\u2014\u2212]', '-', clean_value)
+        
+        # Replace comma decimal separator with dot
+        clean_value = clean_value.replace(',', '.')
+        
+        # Remove currency symbols and extra spaces
+        clean_value = clean_value.replace('$', '').replace('£', '').replace('€', '').replace(' ', '')
+        
+        # Validate final format
+        if not re.match(r'^\s*-?\d+(\.\d+)?\s*$', clean_value):
+            return None
+        
+        try:
+            return float(clean_value)
+        except (ValueError, TypeError):
+            return None
+    
     async def clean_data(self, df: pd.DataFrame, vendor: str, filename: str = None) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
         """Clean data based on vendor-specific rules"""
         
@@ -461,26 +487,20 @@ class DataCleaner:
         else:
             print("DEBUG: No MONTH/YEAR columns found in data, skipping date filtering")
         
-        # Clean ZAR currency values - remove spaces and convert to numeric
+        # Clean ZAR currency values using standardized cleaning
         if 'sales_lc' in df.columns:
             for idx, value in df['sales_lc'].items():
                 if pd.notna(value) and value != '':
-                    # Remove spaces and convert to numeric
-                    clean_value = str(value).replace(' ', '').replace(',', '').strip()
-                    if clean_value:
-                        try:
-                            numeric_value = float(clean_value)
-                            df.at[idx, 'sales_lc'] = str(numeric_value)
-                            transformations.append({
-                                "row_index": idx,
-                                "column_name": "sales_lc",
-                                "original_value": value,
-                                "cleaned_value": str(numeric_value),
-                                "transformation_type": "currency_cleaning"
-                            })
-                        except ValueError:
-                            # If conversion fails, keep original value
-                            pass
+                    cleaned_value = self._clean_numeric_value(value)
+                    if cleaned_value is not None:
+                        df.at[idx, 'sales_lc'] = str(cleaned_value)
+                        transformations.append({
+                            "row_index": idx,
+                            "column_name": "sales_lc",
+                            "original_value": value,
+                            "cleaned_value": str(cleaned_value),
+                            "transformation_type": "currency_cleaning"
+                        })
         
         # Add year and month columns from filename
         df['report_year'] = year
@@ -558,26 +578,20 @@ class DataCleaner:
             print("ERROR: No matching columns found for Skins NL data")
             return df, transformations
         
-        # Clean EUR currency values - remove € symbol and convert to numeric
+        # Clean EUR currency values using standardized cleaning
         if 'sales_lc' in df.columns:
             for idx, value in df['sales_lc'].items():
                 if pd.notna(value) and value != '':
-                    # Remove € symbol and convert to numeric
-                    clean_value = str(value).replace('€', '').replace(',', '').strip()
-                    if clean_value:
-                        try:
-                            numeric_value = float(clean_value)
-                            df.at[idx, 'sales_lc'] = str(numeric_value)
-                            transformations.append({
-                                "row_index": idx,
-                                "column_name": "sales_lc",
-                                "original_value": value,
-                                "cleaned_value": str(numeric_value),
-                                "transformation_type": "currency_cleaning"
-                            })
-                        except ValueError:
-                            # If conversion fails, keep original value
-                            pass
+                    cleaned_value = self._clean_numeric_value(value)
+                    if cleaned_value is not None:
+                        df.at[idx, 'sales_lc'] = str(cleaned_value)
+                        transformations.append({
+                            "row_index": idx,
+                            "column_name": "sales_lc",
+                            "original_value": value,
+                            "cleaned_value": str(cleaned_value),
+                            "transformation_type": "currency_cleaning"
+                        })
         
         # Add year and month columns
         df['report_year'] = year
@@ -972,14 +986,9 @@ class DataCleaner:
                         else:
                             numeric_quantity = 0
                             
-                        # Handle sales_lc conversion  
-                        if pd.notna(sales_lc):
-                            if isinstance(sales_lc, str):
-                                sales_lc_clean = sales_lc.strip().replace(',', '').replace('$', '').replace('£', '')
-                                numeric_sales_lc = float(sales_lc_clean) if sales_lc_clean else 0
-                            else:
-                                numeric_sales_lc = float(sales_lc)
-                        else:
+                        # Handle sales_lc conversion using standardized cleaning
+                        numeric_sales_lc = self._clean_numeric_value(sales_lc)
+                        if numeric_sales_lc is None:
                             numeric_sales_lc = 0
                             
                     except (ValueError, TypeError) as e:

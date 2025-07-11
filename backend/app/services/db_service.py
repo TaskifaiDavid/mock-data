@@ -7,6 +7,9 @@ import json
 from datetime import datetime
 import pandas as pd
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 class DatabaseService:
     def __init__(self):
@@ -88,13 +91,23 @@ class DatabaseService:
             # Prepare sellout entries
             data = []
             for i, entry in enumerate(entries):
+                # Validate sales_lc for numeric compatibility
+                sales_lc_value = entry.get("sales_lc")
+                if sales_lc_value is not None and sales_lc_value != '':
+                    try:
+                        # Ensure it can be converted to float for numeric operations
+                        float(str(sales_lc_value))
+                    except (ValueError, TypeError):
+                        print(f"Warning: Invalid sales_lc value '{sales_lc_value}' for entry {i}, setting to None")
+                        sales_lc_value = None
+                
                 sellout_entry = {
                     "upload_id": upload_id,
                     "product_ean": entry.get("product_ean"),
                     "month": entry.get("month"),
                     "year": entry.get("year"),
                     "quantity": entry.get("quantity"),
-                    "sales_lc": entry.get("sales_lc"),
+                    "sales_lc": sales_lc_value,
                     "sales_eur": entry.get("sales_eur"),
                     "currency": entry.get("currency"),
                     "reseller": entry.get("reseller"),

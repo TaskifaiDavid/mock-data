@@ -74,6 +74,7 @@ CREATE INDEX IF NOT EXISTS idx_transform_logs_upload_id ON public.transform_logs
 ALTER TABLE public.sellout_entries2 
 ADD COLUMN IF NOT EXISTS upload_id uuid REFERENCES public.uploads(id) ON DELETE SET NULL;
 
+
 -- RLS (Row Level Security) policies
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.uploads ENABLE ROW LEVEL SECURITY;
@@ -140,6 +141,7 @@ CREATE POLICY "Anyone can view products" ON public.products
 -- Service role can manage products
 CREATE POLICY "Service role can manage products" ON public.products
   FOR ALL USING (auth.role() = 'service_role');
+
 
 -- RPC function to execute raw SQL queries (for chat functionality)
 -- This function allows the chat service to execute complex SQL queries

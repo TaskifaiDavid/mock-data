@@ -63,8 +63,10 @@ function Dashboard({ user, onLogout }) {
           <StatusList />
         ) : activeView === 'chat' ? (
           <ChatInterface />
-        ) : (
+        ) : activeView === 'analytics' ? (
           <AnalyticsDashboard />
+        ) : (
+          <Upload />
         )}
         </main>
       </div>
