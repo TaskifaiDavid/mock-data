@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { sendChatQuery, getChatHistory, clearChatSession } from '../services/api'
+import DataVisualization from './DataVisualization'
 
 const ChatInterface = () => {
   const [messages, setMessages] = useState([])
@@ -20,12 +21,25 @@ const ChatInterface = () => {
   }, [messages])
 
   useEffect(() => {
-    // Initialize with a welcome message
+    // Initialize with an enhanced welcome message with more examples
     setMessages([
       {
         type: 'assistant',
-        content: 'Hello! I can help you analyze your sales data using natural language. Try asking questions like:\n\n• "Show me total sales for last month"\n• "Which reseller has the highest sales?"\n• "What are my top selling products?"\n• "Show sales by month for 2024"',
-        timestamp: new Date().toISOString()
+        content: `Hello! I'm your AI sales data assistant. I can help you with both normal conversations and sales data analysis.
+
+**💬 Just Chat**: Feel free to say "Hi", ask how I work, or have a normal conversation!
+
+**📊 Sales Data Questions**: Ask me about your business data in plain English:
+• "What are my total sales this year?"
+• "Show me my top 5 resellers"
+• "Which products sold the most last month?"
+• "How did Q4 perform compared to Q3?"
+
+**🚀 I'm Smart**: I can tell the difference between casual chat and data questions, so feel free to interact naturally!
+
+Try saying "Hi" or ask me a specific question about your sales data!`,
+        timestamp: new Date().toISOString(),
+        showSuggestions: true
       }
     ])
     
@@ -83,8 +97,8 @@ const ChatInterface = () => {
         results: response.results,
         resultsCount: response.resultsCount,
         success: response.success,
-        showResults: response.results && response.results.length > 0 && 
-                     (response.message?.includes('Here are') || response.message?.includes('results:'))
+        showResults: response.results && response.results.length > 0,
+        originalQuery: inputMessage // Store original user query for visualization context
       }
 
       setMessages(prev => [...prev, assistantMessage])
@@ -206,45 +220,10 @@ const ChatInterface = () => {
     }
   }
 
-  const formatResults = (results) => {
-    if (!results || results.length === 0) return null
+  // Remove old formatResults function - replaced with DataVisualization component
 
-    // Show first few results in a table format
-    const displayResults = results.slice(0, 10)
-    const columns = Object.keys(displayResults[0])
-
-    return (
-      <div className="query-results">
-        <div className="results-header">
-          <span>Results ({results.length} total, showing first {displayResults.length})</span>
-        </div>
-        <div className="results-table">
-          <table>
-            <thead>
-              <tr>
-                {columns.map(col => (
-                  <th key={col}>{col.replace(/_/g, ' ').toUpperCase()}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {displayResults.map((row, index) => (
-                <tr key={index}>
-                  {columns.map(col => (
-                    <td key={col}>
-                      {row[col] !== null && row[col] !== undefined 
-                        ? String(row[col]) 
-                        : '-'
-                      }
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    )
+  const handleSuggestionClick = (suggestion) => {
+    setInputMessage(suggestion)
   }
 
   const MessageBubble = ({ message }) => (
@@ -253,6 +232,50 @@ const ChatInterface = () => {
         {message.content.split('\n').map((line, index) => (
           <p key={index}>{line}</p>
         ))}
+        
+        {message.showSuggestions && (
+          <div className="query-suggestions">
+            <h4>Try These Examples:</h4>
+            <div className="suggestion-buttons">
+              <button 
+                className="suggestion-btn conversation" 
+                onClick={() => handleSuggestionClick("Hi")}
+              >
+                💬 Say Hi
+              </button>
+              <button 
+                className="suggestion-btn conversation" 
+                onClick={() => handleSuggestionClick("What can you do?")}
+              >
+                🤔 What Can You Do?
+              </button>
+              <button 
+                className="suggestion-btn data" 
+                onClick={() => handleSuggestionClick("What are my total sales this year?")}
+              >
+                📊 Total Sales This Year
+              </button>
+              <button 
+                className="suggestion-btn data" 
+                onClick={() => handleSuggestionClick("Show me my top 5 resellers")}
+              >
+                🏆 Top 5 Resellers
+              </button>
+              <button 
+                className="suggestion-btn data" 
+                onClick={() => handleSuggestionClick("Which products sold the most last month?")}
+              >
+                🛍️ Best Products Last Month
+              </button>
+              <button 
+                className="suggestion-btn conversation" 
+                onClick={() => handleSuggestionClick("How does this work?")}
+              >
+                ❓ How Does This Work?
+              </button>
+            </div>
+          </div>
+        )}
         
         {message.sqlQuery && showSqlQuery && (
           <div className="sql-query">
@@ -274,7 +297,13 @@ const ChatInterface = () => {
           </div>
         )}
         
-        {message.showResults && message.results && formatResults(message.results)}
+        {message.showResults && message.results && (
+          <DataVisualization 
+            results={message.results} 
+            sqlQuery={message.sqlQuery}
+            originalMessage={message.originalQuery || ''} 
+          />
+        )}
       </div>
       <div className="message-time">
         {new Date(message.timestamp).toLocaleTimeString()}

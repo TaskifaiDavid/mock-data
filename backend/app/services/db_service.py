@@ -528,6 +528,171 @@ class DatabaseService:
     
     # ============ NEW V2.0 METHODS FOR CHAT, EMAIL, AND DASHBOARD APIs ============
     
+    async def get_database_schema(self) -> Dict[str, Any]:
+        """
+        Get comprehensive database schema information for chat AI context
+        Returns table structures, relationships, and sample data
+        """
+        try:
+            schema_info = {
+                "tables": {},
+                "relationships": [],
+                "sample_data": {}
+            }
+            
+            # Core tables we want to analyze
+            tables_to_analyze = [
+                "sellout_entries2", "uploads", "products", 
+                "chat_sessions", "chat_messages", "email_logs"
+            ]
+            
+            for table_name in tables_to_analyze:
+                try:
+                    # Get table structure using information_schema approach
+                    table_info = await self._get_table_info(table_name)
+                    if table_info:
+                        schema_info["tables"][table_name] = table_info
+                        
+                        # Get sample data for context
+                        sample = await self._get_sample_data(table_name)
+                        if sample:
+                            schema_info["sample_data"][table_name] = sample
+                            
+                except Exception as table_error:
+                    print(f"Warning: Could not analyze table {table_name}: {table_error}")
+                    continue
+            
+            # Define known relationships for better SQL generation
+            schema_info["relationships"] = [
+                {
+                    "from_table": "sellout_entries2",
+                    "to_table": "uploads", 
+                    "join_condition": "sellout_entries2.upload_id = uploads.id",
+                    "description": "Sales entries belong to file uploads"
+                },
+                {
+                    "from_table": "sellout_entries2",
+                    "to_table": "products",
+                    "join_condition": "sellout_entries2.product_ean = products.ean",
+                    "description": "Sales entries reference products by EAN"
+                },
+                {
+                    "from_table": "uploads",
+                    "to_table": "users",
+                    "join_condition": "uploads.user_id = users.id",
+                    "description": "Uploads belong to users"
+                },
+                {
+                    "from_table": "chat_messages",
+                    "to_table": "chat_sessions",
+                    "join_condition": "chat_messages.session_id = chat_sessions.id",
+                    "description": "Messages belong to chat sessions"
+                }
+            ]
+            
+            return schema_info
+            
+        except Exception as e:
+            print(f"ERROR in get_database_schema: {str(e)}")
+            return {"tables": {}, "relationships": [], "sample_data": {}}
+    
+    async def _get_table_info(self, table_name: str) -> Optional[Dict[str, Any]]:
+        """Get detailed information about a specific table"""
+        try:
+            # Try to get a sample record to understand the structure
+            result = self.supabase.table(table_name).select("*").limit(1).execute()
+            
+            if result.data and len(result.data) > 0:
+                sample_record = result.data[0]
+                
+                # Build column information from the sample record
+                columns = []
+                for column_name, value in sample_record.items():
+                    column_info = {
+                        "name": column_name,
+                        "type": self._infer_column_type(value),
+                        "sample_value": str(value) if value is not None else None
+                    }
+                    columns.append(column_info)
+                
+                # Get table count for context
+                count_result = self.supabase.table(table_name).select("*", count="exact").execute()
+                row_count = count_result.count if count_result.count else 0
+                
+                return {
+                    "name": table_name,
+                    "columns": columns,
+                    "row_count": row_count,
+                    "description": self._get_table_description(table_name)
+                }
+            else:
+                print(f"No data found in table {table_name}")
+                return None
+                
+        except Exception as e:
+            print(f"Error getting info for table {table_name}: {str(e)}")
+            return None
+    
+    def _infer_column_type(self, value) -> str:
+        """Infer column type from sample value"""
+        if value is None:
+            return "nullable"
+        elif isinstance(value, bool):
+            return "boolean"
+        elif isinstance(value, int):
+            return "integer"
+        elif isinstance(value, float):
+            return "numeric"
+        elif isinstance(value, str):
+            # Try to detect special string types
+            if len(value) == 36 and '-' in value:  # UUID pattern
+                return "uuid"
+            elif value.count('-') == 2 and 'T' in value:  # Datetime pattern
+                return "timestamp"
+            else:
+                return "text"
+        else:
+            return "unknown"
+    
+    def _get_table_description(self, table_name: str) -> str:
+        """Get human-readable description of table purpose"""
+        descriptions = {
+            "sellout_entries2": "Sales transaction records with product, reseller, quantities, and revenue data",
+            "uploads": "File upload tracking with user ownership and processing status",
+            "products": "Product catalog with EANs and names for reference",
+            "chat_sessions": "User chat conversation sessions",
+            "chat_messages": "Individual messages within chat sessions",
+            "email_logs": "Email sending history and status tracking"
+        }
+        return descriptions.get(table_name, f"Data table: {table_name}")
+    
+    async def _get_sample_data(self, table_name: str, limit: int = 3) -> List[Dict[str, Any]]:
+        """Get sample data from table for AI context"""
+        try:
+            result = self.supabase.table(table_name).select("*").limit(limit).execute()
+            
+            if result.data:
+                # Clean up sample data - remove sensitive info and truncate long values
+                cleaned_data = []
+                for record in result.data:
+                    cleaned_record = {}
+                    for key, value in record.items():
+                        # Skip sensitive fields
+                        if key in ['password', 'api_key', 'secret', 'token']:
+                            cleaned_record[key] = "[REDACTED]"
+                        elif isinstance(value, str) and len(value) > 50:
+                            cleaned_record[key] = value[:47] + "..."
+                        else:
+                            cleaned_record[key] = value
+                    cleaned_data.append(cleaned_record)
+                
+                return cleaned_data
+            return []
+            
+        except Exception as e:
+            print(f"Error getting sample data for {table_name}: {str(e)}")
+            return []
+    
     async def fetch_all(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
         """
         Execute a SELECT query and return all results as a list of dictionaries
@@ -736,27 +901,505 @@ class DatabaseService:
     async def _query_sellout_entries(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
         """Handle sellout_entries2 table queries for reports and chat"""
         try:
-            print(f"DEBUG: Executing sellout_entries2 query: {query}")
+            print(f"📊 EXECUTING SELLOUT QUERY: {query}")
+            print(f"📊 PARAMS: {params}")
             
-            # Execute the query using Supabase RPC (stored procedure) for complex SQL
-            # This allows us to run actual SQL instead of being limited to PostgREST operations
-            result = self.supabase.rpc('execute_sql_query', {
-                'query_text': query
-            }).execute()
-            
-            print(f"DEBUG: Query result: {result.data}")
-            return result.data if result.data else []
+            # Skip the failing RPC call and go directly to smart query execution
+            return await self._execute_smart_sellout_query(query, params)
             
         except Exception as e:
-            print(f"ERROR in _query_sellout_entries: {str(e)}")
-            print(f"DEBUG: Query was: {query}")
+            print(f"❌ ERROR in _query_sellout_entries: {str(e)}")
+            print(f"🔍 Query was: {query}")
+            return []
+    
+    async def _execute_smart_sellout_query(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
+        """Execute sellout_entries2 queries with proper user filtering"""
+        try:
+            # Extract user_id from params for filtering
+            user_id = params[0] if params and len(params) > 0 else None
             
-            # Fallback to direct table queries for simple cases
-            try:
-                return await self._fallback_sellout_query(query)
-            except Exception as fallback_error:
-                print(f"ERROR in fallback query: {str(fallback_error)}")
+            if not user_id:
+                print("⚠️ WARNING: No user_id provided for sellout query")
                 return []
+            
+            print(f"👤 Executing query for user: {user_id}")
+            
+            # Parse the SQL query to understand what we're trying to do
+            query_upper = query.upper()
+            
+            print(f"🔍 ANALYZING QUERY: {query_upper[:100]}...")
+            
+            # Enhanced intent detection based on SQL patterns and content
+            # Time-based queries (year, month, quarterly analysis)
+            if self._is_time_based_query(query_upper):
+                print("📅 DETECTED: Time-based query")
+                return await self._handle_time_based_query(query, user_id)
+            
+            # Product analysis queries 
+            elif self._is_product_analysis_query(query_upper):
+                print("🛍️ DETECTED: Product analysis query")
+                return await self._handle_product_analysis_query(query, user_id)
+            
+            # Reseller/customer analysis queries
+            elif self._is_reseller_analysis_query(query_upper):
+                print("👥 DETECTED: Reseller analysis query") 
+                return await self._handle_reseller_analysis_query(query, user_id)
+            
+            # Simple aggregation for total queries
+            elif self._is_simple_total_query(query_upper):
+                print("💰 DETECTED: Simple total query")
+                return await self._handle_aggregation_query(query, user_id)
+            
+            # Simple select queries
+            elif self._is_simple_select_query(query_upper):
+                return await self._handle_simple_select(query, user_id)
+            
+            # Grouped queries (fallback)
+            elif "GROUP BY" in query_upper:
+                return await self._handle_grouped_query(query, user_id)
+            else:
+                # For complex queries, use the enhanced fallback with user filtering
+                return await self._fallback_sellout_query_with_user(query, user_id)
+                
+        except Exception as e:
+            print(f"❌ ERROR in smart query execution: {str(e)}")
+            return []
+    
+    def _is_simple_select_query(self, query_upper: str) -> bool:
+        """Check if this is a simple SELECT query without aggregations"""
+        return (
+            query_upper.startswith("SELECT") and 
+            "SUM(" not in query_upper and 
+            "COUNT(" not in query_upper and 
+            "GROUP BY" not in query_upper
+        )
+    
+    def _is_time_based_query(self, query_upper: str) -> bool:
+        """Check if this is a time-based analysis query"""
+        time_indicators = [
+            "YEAR", "MONTH", "QUARTER", "2024", "2025", "Q1", "Q2", "Q3", "Q4",
+            "MONTHLY", "QUARTERLY", "YEARLY", "ANNUAL", "TEMPORAL"
+        ]
+        return any(indicator in query_upper for indicator in time_indicators)
+    
+    def _is_product_analysis_query(self, query_upper: str) -> bool:
+        """Check if this is a product analysis query"""
+        # First check if it's actually a reseller query - reseller has priority
+        if self._has_reseller_indicators(query_upper):
+            return False
+            
+        product_indicators = [
+            "FUNCTIONAL_NAME", "PRODUCT", "TOP SELLING", "BEST SELLING", 
+            "PRODUCT BREAKDOWN", "PRODUCT PERFORMANCE", "ITEM"
+        ]
+        return any(indicator in query_upper for indicator in product_indicators)
+    
+    def _is_reseller_analysis_query(self, query_upper: str) -> bool:
+        """Check if this is a reseller/customer analysis query"""
+        return self._has_reseller_indicators(query_upper)
+    
+    def _has_reseller_indicators(self, query_upper: str) -> bool:
+        """Helper method to check for reseller indicators"""
+        reseller_indicators = [
+            "RESELLER", "CUSTOMER", "CLIENT", "PARTNER", "TOP RESELLER",
+            "BEST CUSTOMER", "RESELLER BREAKDOWN", "CUSTOMER PERFORMANCE"
+        ]
+        # Check for explicit reseller patterns in SELECT and GROUP BY clauses
+        has_reseller_select = "SELECT RESELLER" in query_upper or "SELECT.*RESELLER" in query_upper
+        has_reseller_group = "GROUP BY RESELLER" in query_upper
+        has_reseller_keyword = any(indicator in query_upper for indicator in reseller_indicators)
+        
+        return has_reseller_select or has_reseller_group or has_reseller_keyword
+    
+    def _is_simple_total_query(self, query_upper: str) -> bool:
+        """Check if this is a simple total/aggregation query without breakdowns"""
+        # Only return true for queries that just want a total without grouping
+        has_sum = "SUM(" in query_upper and "SALES_EUR" in query_upper
+        has_no_grouping = "GROUP BY" not in query_upper
+        has_total_intent = any(word in query_upper for word in ["TOTAL", "SUM", "OVERALL"])
+        
+        return has_sum and has_no_grouping and has_total_intent
+    
+    async def _handle_simple_select(self, query: str, user_id: str) -> List[Dict[str, Any]]:
+        """Handle simple SELECT queries with user filtering"""
+        try:
+            print("🔍 Handling simple SELECT query")
+            
+            # For simple selects, just get recent data for the user
+            result = self.supabase.table("sellout_entries2")\
+                .select("*, uploads!inner(user_id)")\
+                .eq("uploads.user_id", user_id)\
+                .order("created_at", desc=True)\
+                .limit(100)\
+                .execute()
+            
+            if result.data:
+                # Clean up the data - remove the uploads join data
+                cleaned_data = []
+                for row in result.data:
+                    clean_row = {k: v for k, v in row.items() if k != 'uploads'}
+                    cleaned_data.append(clean_row)
+                
+                print(f"✅ Retrieved {len(cleaned_data)} records for user")
+                return cleaned_data
+            
+            return []
+            
+        except Exception as e:
+            print(f"❌ Error in simple select: {str(e)}")
+            return []
+    
+    async def _handle_aggregation_query(self, query: str, user_id: str) -> List[Dict[str, Any]]:
+        """Handle aggregation queries like SUM() with user filtering"""
+        try:
+            print("📊 Handling aggregation query")
+            
+            # Get all user's data and perform aggregation
+            result = self.supabase.table("sellout_entries2")\
+                .select("sales_eur, sales_lc, currency, uploads!inner(user_id)")\
+                .eq("uploads.user_id", user_id)\
+                .execute()
+            
+            if result.data:
+                # Calculate total sales in EUR
+                total_eur = sum(float(row.get('sales_eur', 0) or 0) for row in result.data)
+                
+                print(f"💰 Calculated total sales for user {user_id}: €{total_eur:,.2f}")
+                
+                return [{
+                    "total_sales_eur": total_eur,
+                    "total_records": len(result.data)
+                }]
+            
+            return [{"total_sales_eur": 0, "total_records": 0}]
+            
+        except Exception as e:
+            print(f"❌ Error in aggregation query: {str(e)}")
+            return []
+    
+    async def _handle_grouped_query(self, query: str, user_id: str) -> List[Dict[str, Any]]:
+        """Handle GROUP BY queries with user filtering"""
+        try:
+            print("📈 Handling grouped query")
+            
+            query_upper = query.upper()
+            
+            # Determine what we're grouping by
+            if "RESELLER" in query_upper:
+                return await self._group_by_reseller(user_id)
+            elif "FUNCTIONAL_NAME" in query_upper or "PRODUCT" in query_upper:
+                return await self._group_by_product(user_id)
+            elif "MONTH" in query_upper or "YEAR" in query_upper:
+                return await self._group_by_time(user_id)
+            else:
+                # Default grouping
+                return await self._group_by_reseller(user_id)
+                
+        except Exception as e:
+            print(f"❌ Error in grouped query: {str(e)}")
+            return []
+    
+    async def _group_by_reseller(self, user_id: str) -> List[Dict[str, Any]]:
+        """Group sales data by reseller for specific user"""
+        try:
+            result = self.supabase.table("sellout_entries2")\
+                .select("reseller, sales_eur, quantity, uploads!inner(user_id)")\
+                .eq("uploads.user_id", user_id)\
+                .execute()
+            
+            if result.data:
+                # Group by reseller manually
+                reseller_stats = {}
+                for row in result.data:
+                    reseller = row.get('reseller', 'Unknown')
+                    if reseller not in reseller_stats:
+                        reseller_stats[reseller] = {
+                            'total_sales_eur': 0,
+                            'total_quantity': 0,
+                            'record_count': 0
+                        }
+                    
+                    reseller_stats[reseller]['total_sales_eur'] += float(row.get('sales_eur', 0) or 0)
+                    reseller_stats[reseller]['total_quantity'] += int(row.get('quantity', 0) or 0)
+                    reseller_stats[reseller]['record_count'] += 1
+                
+                # Convert to list and sort by sales
+                result_list = []
+                for reseller, stats in reseller_stats.items():
+                    result_list.append({
+                        'reseller': reseller,
+                        'total_sales_eur': stats['total_sales_eur'],
+                        'total_sales': stats['total_sales_eur'],  # Add alias for response compatibility
+                        'total_quantity': stats['total_quantity'],
+                        'record_count': stats['record_count']
+                    })
+                
+                result_list.sort(key=lambda x: x['total_sales_eur'], reverse=True)
+                
+                print(f"📊 Grouped by reseller: {len(result_list)} resellers found")
+                return result_list[:20]  # Top 20 resellers
+            
+            return []
+            
+        except Exception as e:
+            print(f"❌ Error grouping by reseller: {str(e)}")
+            return []
+    
+    async def _group_by_product(self, user_id: str) -> List[Dict[str, Any]]:
+        """Group sales data by product for specific user"""
+        try:
+            result = self.supabase.table("sellout_entries2")\
+                .select("functional_name, sales_eur, quantity, uploads!inner(user_id)")\
+                .eq("uploads.user_id", user_id)\
+                .execute()
+            
+            if result.data:
+                # Group by product manually
+                product_stats = {}
+                for row in result.data:
+                    product = row.get('functional_name', 'Unknown')
+                    if product not in product_stats:
+                        product_stats[product] = {
+                            'total_sales_eur': 0,
+                            'total_quantity': 0,
+                            'record_count': 0
+                        }
+                    
+                    product_stats[product]['total_sales_eur'] += float(row.get('sales_eur', 0) or 0)
+                    product_stats[product]['total_quantity'] += int(row.get('quantity', 0) or 0)
+                    product_stats[product]['record_count'] += 1
+                
+                # Convert to list and sort by sales
+                result_list = []
+                for product, stats in product_stats.items():
+                    result_list.append({
+                        'functional_name': product,
+                        'product': product,  # Add alias for response compatibility
+                        'total_sales_eur': stats['total_sales_eur'],
+                        'total_sales': stats['total_sales_eur'],  # Add alias for response compatibility
+                        'total_quantity': stats['total_quantity'],
+                        'record_count': stats['record_count']
+                    })
+                
+                result_list.sort(key=lambda x: x['total_sales_eur'], reverse=True)
+                
+                print(f"🛍️ Grouped by product: {len(result_list)} products found")
+                return result_list[:20]  # Top 20 products
+            
+            return []
+            
+        except Exception as e:
+            print(f"❌ Error grouping by product: {str(e)}")
+            return []
+    
+    async def _group_by_time(self, user_id: str) -> List[Dict[str, Any]]:
+        """Group sales data by time for specific user"""
+        try:
+            result = self.supabase.table("sellout_entries2")\
+                .select("year, month, sales_eur, uploads!inner(user_id)")\
+                .eq("uploads.user_id", user_id)\
+                .execute()
+            
+            if result.data:
+                # Group by year/month manually
+                time_stats = {}
+                for row in result.data:
+                    year = row.get('year', 'Unknown')
+                    month = row.get('month', 'Unknown')
+                    time_key = f"{year}-{month:02d}" if isinstance(month, int) else f"{year}-{month}"
+                    
+                    if time_key not in time_stats:
+                        time_stats[time_key] = {
+                            'year': year,
+                            'month': month,
+                            'total_sales_eur': 0,
+                            'record_count': 0
+                        }
+                    
+                    time_stats[time_key]['total_sales_eur'] += float(row.get('sales_eur', 0) or 0)
+                    time_stats[time_key]['record_count'] += 1
+                
+                # Convert to list and sort by time
+                result_list = list(time_stats.values())
+                result_list.sort(key=lambda x: (x['year'], x['month']), reverse=True)
+                
+                print(f"📅 Grouped by time: {len(result_list)} periods found")
+                return result_list[:24]  # Last 24 months
+            
+            return []
+            
+        except Exception as e:
+            print(f"❌ Error grouping by time: {str(e)}")
+            return []
+    
+    # ========== NEW INTENT-BASED HANDLERS ==========
+    
+    async def _handle_time_based_query(self, query: str, user_id: str) -> List[Dict[str, Any]]:
+        """Handle time-based queries to return meaningful breakdowns"""
+        try:
+            print("📅 Processing time-based query for meaningful breakdown")
+            
+            query_upper = query.upper()
+            
+            # Check for specific year patterns
+            if "2024" in query_upper or "2025" in query_upper:
+                # Return monthly breakdown for the year
+                return await self._get_monthly_breakdown_for_year(user_id, query_upper)
+            
+            # Check for quarter patterns
+            elif any(q in query_upper for q in ["Q1", "Q2", "Q3", "Q4", "QUARTER"]):
+                return await self._get_quarterly_breakdown(user_id)
+            
+            # Default to monthly breakdown
+            else:
+                return await self._group_by_time(user_id)
+                
+        except Exception as e:
+            print(f"❌ Error in time-based query: {str(e)}")
+            return []
+    
+    async def _handle_product_analysis_query(self, query: str, user_id: str) -> List[Dict[str, Any]]:
+        """Handle product analysis queries to return meaningful product breakdowns"""
+        try:
+            print("🛍️ Processing product analysis query")
+            return await self._group_by_product(user_id)
+        except Exception as e:
+            print(f"❌ Error in product analysis query: {str(e)}")
+            return []
+    
+    async def _handle_reseller_analysis_query(self, query: str, user_id: str) -> List[Dict[str, Any]]:
+        """Handle reseller analysis queries to return meaningful reseller breakdowns"""
+        try:
+            print("👥 Processing reseller analysis query")
+            return await self._group_by_reseller(user_id)
+        except Exception as e:
+            print(f"❌ Error in reseller analysis query: {str(e)}")
+            return []
+    
+    async def _get_monthly_breakdown_for_year(self, user_id: str, query_upper: str) -> List[Dict[str, Any]]:
+        """Get monthly breakdown for a specific year"""
+        try:
+            # Extract year from query
+            year = 2024 if "2024" in query_upper else 2025
+            
+            result = self.supabase.table("sellout_entries2")\
+                .select("year, month, sales_eur, quantity, uploads!inner(user_id)")\
+                .eq("uploads.user_id", user_id)\
+                .eq("year", year)\
+                .execute()
+            
+            if result.data:
+                # Group by month manually
+                month_stats = {}
+                for row in result.data:
+                    month = row.get('month', 0)
+                    if month not in month_stats:
+                        month_stats[month] = {
+                            'year': year,
+                            'month': month,
+                            'total_sales_eur': 0,
+                            'total_quantity': 0,
+                            'record_count': 0
+                        }
+                    
+                    month_stats[month]['total_sales_eur'] += float(row.get('sales_eur', 0) or 0)
+                    month_stats[month]['total_quantity'] += int(row.get('quantity', 0) or 0)
+                    month_stats[month]['record_count'] += 1
+                
+                # Convert to list and sort by month
+                result_list = list(month_stats.values())
+                result_list.sort(key=lambda x: x['month'])
+                
+                print(f"📅 Monthly breakdown for {year}: {len(result_list)} months found")
+                return result_list
+            
+            return []
+            
+        except Exception as e:
+            print(f"❌ Error getting monthly breakdown: {str(e)}")
+            return []
+    
+    async def _get_quarterly_breakdown(self, user_id: str) -> List[Dict[str, Any]]:
+        """Get quarterly breakdown"""
+        try:
+            result = self.supabase.table("sellout_entries2")\
+                .select("year, month, sales_eur, quantity, uploads!inner(user_id)")\
+                .eq("uploads.user_id", user_id)\
+                .execute()
+            
+            if result.data:
+                # Group by quarter manually
+                quarter_stats = {}
+                for row in result.data:
+                    year = row.get('year', 0)
+                    month = row.get('month', 0)
+                    
+                    # Determine quarter
+                    if month in [1, 2, 3]:
+                        quarter = "Q1"
+                    elif month in [4, 5, 6]:
+                        quarter = "Q2"
+                    elif month in [7, 8, 9]:
+                        quarter = "Q3"
+                    else:
+                        quarter = "Q4"
+                    
+                    key = f"{year}-{quarter}"
+                    if key not in quarter_stats:
+                        quarter_stats[key] = {
+                            'year': year,
+                            'quarter': quarter,
+                            'total_sales_eur': 0,
+                            'total_quantity': 0,
+                            'record_count': 0
+                        }
+                    
+                    quarter_stats[key]['total_sales_eur'] += float(row.get('sales_eur', 0) or 0)
+                    quarter_stats[key]['total_quantity'] += int(row.get('quantity', 0) or 0)
+                    quarter_stats[key]['record_count'] += 1
+                
+                # Convert to list and sort by year and quarter
+                result_list = list(quarter_stats.values())
+                result_list.sort(key=lambda x: (x['year'], x['quarter']))
+                
+                print(f"📅 Quarterly breakdown: {len(result_list)} quarters found")
+                return result_list
+            
+            return []
+            
+        except Exception as e:
+            print(f"❌ Error getting quarterly breakdown: {str(e)}")
+            return []
+    
+    async def _fallback_sellout_query_with_user(self, query: str, user_id: str) -> List[Dict[str, Any]]:
+        """Enhanced fallback for complex queries with user filtering"""
+        try:
+            print(f"🔄 FALLBACK: Using user-filtered fallback for complex query")
+            print(f"🔄 User: {user_id}, Query: {query}")
+            
+            # For complex queries we can't parse, just return recent user data
+            result = self.supabase.table("sellout_entries2")\
+                .select("*, uploads!inner(user_id)")\
+                .eq("uploads.user_id", user_id)\
+                .order("created_at", desc=True)\
+                .limit(50)\
+                .execute()
+            
+            if result.data:
+                # Clean up the data - remove the uploads join data
+                cleaned_data = []
+                for row in result.data:
+                    clean_row = {k: v for k, v in row.items() if k != 'uploads'}
+                    cleaned_data.append(clean_row)
+                
+                print(f"🔄 Fallback returned {len(cleaned_data)} records for user")
+                return cleaned_data
+            
+            return []
+            
+        except Exception as e:
+            print(f"❌ Error in user fallback query: {str(e)}")
+            return []
     
     async def _fallback_sellout_query(self, query: str) -> List[Dict[str, Any]]:
         """Enhanced fallback method for sellout_entries2 queries with better SQL pattern recognition"""
