@@ -205,29 +205,6 @@ class ApiService {
     return this.request(`/api/email/logs?limit=${limit}&offset=${offset}`)
   }
 
-  // Chat methods
-  async sendChatQuery(queryRequest) {
-    console.log('🗨️ SendChatQuery called with:', queryRequest)
-    console.log('🔍 This context check:', this ? 'Valid' : 'UNDEFINED')
-    
-    return this.request('/api/chat/query', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(queryRequest),
-    })
-  }
-
-  async getChatHistory(sessionId) {
-    return this.request(`/api/chat/history/${sessionId}`)
-  }
-
-  async clearChatSession(sessionId) {
-    return this.request(`/api/chat/clear/${sessionId}`, {
-      method: 'POST',
-    })
-  }
 
   // Dashboard methods
   async getDashboardConfigs() {
@@ -272,9 +249,6 @@ export const generateReport = apiService.generateReport.bind(apiService)
 export const sendReportEmail = apiService.sendReportEmail.bind(apiService)
 export const sendNotificationEmail = apiService.sendNotificationEmail.bind(apiService)
 export const getEmailLogs = apiService.getEmailLogs.bind(apiService)
-export const sendChatQuery = apiService.sendChatQuery.bind(apiService)
-export const getChatHistory = apiService.getChatHistory.bind(apiService)
-export const clearChatSession = apiService.clearChatSession.bind(apiService)
 export const getDashboardConfigs = apiService.getDashboardConfigs.bind(apiService)
 export const saveDashboardConfig = apiService.saveDashboardConfig.bind(apiService)
 export const updateDashboardConfig = apiService.updateDashboardConfig.bind(apiService)

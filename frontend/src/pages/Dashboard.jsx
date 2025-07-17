@@ -1,7 +1,6 @@
 import React, { useState } from 'react'
 import Upload from '../components/Upload'
 import StatusList from '../components/StatusList'
-import ChatInterface from '../components/ChatInterface'
 import AnalyticsDashboard from '../components/AnalyticsDashboard'
 
 function Dashboard({ user, onLogout }) {
@@ -43,12 +42,6 @@ function Dashboard({ user, onLogout }) {
             Processing Status
           </button>
           <button
-            className={activeView === 'chat' ? 'active' : ''}
-            onClick={() => setActiveView('chat')}
-          >
-            Chat
-          </button>
-          <button
             className={activeView === 'analytics' ? 'active' : ''}
             onClick={() => setActiveView('analytics')}
           >
@@ -61,8 +54,6 @@ function Dashboard({ user, onLogout }) {
           <Upload />
         ) : activeView === 'status' ? (
           <StatusList />
-        ) : activeView === 'chat' ? (
-          <ChatInterface />
         ) : activeView === 'analytics' ? (
           <AnalyticsDashboard />
         ) : (
