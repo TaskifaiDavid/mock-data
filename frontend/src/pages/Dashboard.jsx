@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import Upload from '../components/Upload'
 import StatusList from '../components/StatusList'
 import AnalyticsDashboard from '../components/AnalyticsDashboard'
+import ChatSection from '../components/ChatSection'
 
 function Dashboard({ user, onLogout }) {
   const [activeView, setActiveView] = useState('upload')
@@ -47,6 +48,12 @@ function Dashboard({ user, onLogout }) {
           >
             Analytics
           </button>
+          <button
+            className={activeView === 'chat' ? 'active' : ''}
+            onClick={() => setActiveView('chat')}
+          >
+            Data Chat
+          </button>
         </nav>
 
         <main className="dashboard-content">
@@ -56,6 +63,8 @@ function Dashboard({ user, onLogout }) {
           <StatusList />
         ) : activeView === 'analytics' ? (
           <AnalyticsDashboard />
+        ) : activeView === 'chat' ? (
+          <ChatSection />
         ) : (
           <Upload />
         )}

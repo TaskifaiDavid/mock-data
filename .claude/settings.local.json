@@ -19,7 +19,12 @@
       "Bash(chmod:*)",
       "Bash(npm run dev:*)",
       "Bash(kill:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(git remote:*)",
+      "Bash(git branch:*)",
+      "Bash(npm run lint)",
+      "Bash(npm run:*)",
+      "Bash(cp:*)"
     ],
     "deny": []
   }

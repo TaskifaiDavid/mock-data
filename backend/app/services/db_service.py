@@ -526,11 +526,11 @@ class DatabaseService:
             # Log transformation failures are non-critical
             pass
     
-    # ============ NEW V2.0 METHODS FOR CHAT, EMAIL, AND DASHBOARD APIs ============
+    # ============ NEW V2.0 METHODS FOR EMAIL, AND DASHBOARD APIs ============
     
     async def get_database_schema(self) -> Dict[str, Any]:
         """
-        Get comprehensive database schema information for chat AI context
+        Get comprehensive database schema information
         Returns table structures, relationships, and sample data
         """
         try:
@@ -543,7 +543,7 @@ class DatabaseService:
             # Core tables we want to analyze
             tables_to_analyze = [
                 "sellout_entries2", "uploads", "products", 
-                "chat_sessions", "chat_messages", "email_logs"
+                "email_logs"
             ]
             
             for table_name in tables_to_analyze:
@@ -581,12 +581,6 @@ class DatabaseService:
                     "to_table": "users",
                     "join_condition": "uploads.user_id = users.id",
                     "description": "Uploads belong to users"
-                },
-                {
-                    "from_table": "chat_messages",
-                    "to_table": "chat_sessions",
-                    "join_condition": "chat_messages.session_id = chat_sessions.id",
-                    "description": "Messages belong to chat sessions"
                 }
             ]
             
@@ -660,8 +654,6 @@ class DatabaseService:
             "sellout_entries2": "Sales transaction records with product, reseller, quantities, and revenue data",
             "uploads": "File upload tracking with user ownership and processing status",
             "products": "Product catalog with EANs and names for reference",
-            "chat_sessions": "User chat conversation sessions",
-            "chat_messages": "Individual messages within chat sessions",
             "email_logs": "Email sending history and status tracking"
         }
         return descriptions.get(table_name, f"Data table: {table_name}")
@@ -696,7 +688,7 @@ class DatabaseService:
     async def fetch_all(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
         """
         Execute a SELECT query and return all results as a list of dictionaries
-        Used by chat, email, and dashboard services
+        Used by email and dashboard services
         """
         try:
             # Convert PostgreSQL query to Supabase table operation where possible
@@ -705,10 +697,6 @@ class DatabaseService:
             # Handle simple table queries
             if "FROM email_logs" in query:
                 return await self._query_email_logs(query, params)
-            elif "FROM chat_sessions" in query:
-                return await self._query_chat_sessions(query, params)
-            elif "FROM chat_messages" in query:
-                return await self._query_chat_messages(query, params)
             elif "FROM dashboard_configs" in query:
                 return await self._query_dashboard_configs(query, params)
             elif "FROM sellout_entries2" in query:
@@ -731,7 +719,7 @@ class DatabaseService:
     async def fetch_one(self, query: str, params: tuple = None) -> Optional[Dict[str, Any]]:
         """
         Execute a SELECT query and return the first result as a dictionary
-        Used by chat, email, and dashboard services
+        Used by email and dashboard services
         """
         try:
             results = await self.fetch_all(query, params)
@@ -743,7 +731,7 @@ class DatabaseService:
     async def execute(self, query: str, params: tuple = None) -> Optional[Dict[str, Any]]:
         """
         Execute an INSERT/UPDATE/DELETE query
-        Used by chat, email, and dashboard services
+        Used by email and dashboard services
         """
         try:
             # Handle INSERT operations
@@ -796,73 +784,7 @@ class DatabaseService:
             print(f"ERROR in _query_email_logs: {str(e)}")
             return []
     
-    async def _query_chat_sessions(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
-        """Handle chat_sessions table queries"""
-        try:
-            user_id = params[0] if params and len(params) > 0 else None
-            
-            # Don't execute query if no user_id provided
-            if not user_id:
-                print("WARNING: No user_id provided to _query_chat_sessions")
-                return []
-            
-            if "GROUP BY" in query and "ORDER BY" in query:
-                # Complex query for sessions with message counts
-                # For now, return simple sessions and let the API layer handle counts
-                result = self.supabase.table("chat_sessions")\
-                    .select("*")\
-                    .eq("user_id", user_id)\
-                    .order("updated_at", desc=True)\
-                    .execute()
-                return result.data if result.data else []
-            else:
-                # Simple sessions query
-                result = self.supabase.table("chat_sessions")\
-                    .select("*")\
-                    .eq("user_id", user_id)\
-                    .execute()
-                return result.data if result.data else []
-                
-        except Exception as e:
-            print(f"ERROR in _query_chat_sessions: {str(e)}")
-            return []
     
-    async def _query_chat_messages(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
-        """Handle chat_messages table queries"""
-        try:
-            if not params or len(params) < 2:
-                print("WARNING: Insufficient parameters for _query_chat_messages")
-                return []
-            
-            session_id, user_id = params[0], params[1]
-            
-            # Don't execute query if essential parameters are None
-            if not session_id or not user_id:
-                print("WARNING: Missing session_id or user_id in _query_chat_messages")
-                return []
-                
-            if "ORDER BY created_at ASC" in query:
-                # Get messages for session ordered by creation
-                result = self.supabase.table("chat_messages")\
-                    .select("*")\
-                    .eq("session_id", session_id)\
-                    .eq("user_id", user_id)\
-                    .order("created_at", desc=False)\
-                    .execute()
-                return result.data if result.data else []
-            elif "ORDER BY created_at DESC" in query:
-                # Get recent messages for context
-                result = self.supabase.table("chat_messages")\
-                    .select("*")\
-                    .eq("session_id", session_id)\
-                    .order("created_at", desc=True)\
-                    .limit(10)\
-                    .execute()
-                return result.data if result.data else []
-                        
-        except Exception as e:
-            print(f"ERROR in _query_chat_messages: {str(e)}")
-            return []
     
     async def _query_dashboard_configs(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
         """Handle dashboard_configs table queries"""
@@ -1692,7 +1614,7 @@ class DatabaseService:
             return []
     
     async def _query_schema_info(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
-        """Handle information_schema queries for chat schema introspection"""
+        """Handle information_schema queries for schema introspection"""
         try:
             # Return mock schema info for sellout_entries2
             return [
@@ -1720,10 +1642,6 @@ class DatabaseService:
         try:
             if "INSERT INTO email_logs" in query:
                 return await self._insert_email_log(params)
-            elif "INSERT INTO chat_sessions" in query:
-                return await self._insert_chat_session(params)
-            elif "INSERT INTO chat_messages" in query:
-                return await self._insert_chat_message(params)
             elif "INSERT INTO dashboard_configs" in query:
                 return await self._insert_dashboard_config(params)
             else:
@@ -1756,46 +1674,7 @@ class DatabaseService:
             print(f"ERROR in _insert_email_log: {str(e)}")
             raise
     
-    async def _insert_chat_session(self, params: tuple) -> Optional[Dict[str, Any]]:
-        """Insert chat session record"""
-        try:
-            user_id, session_name, created_at = params
-            
-            data = {
-                "user_id": user_id,
-                "session_name": session_name,
-                "created_at": created_at.isoformat() if hasattr(created_at, 'isoformat') else str(created_at),
-                "updated_at": created_at.isoformat() if hasattr(created_at, 'isoformat') else str(created_at)
-            }
-            
-            result = self.supabase.table("chat_sessions").insert(data).execute()
-            return result.data[0] if result.data else None
-            
-        except Exception as e:
-            print(f"ERROR in _insert_chat_session: {str(e)}")
-            raise
     
-    async def _insert_chat_message(self, params: tuple) -> Optional[Dict[str, Any]]:
-        """Insert chat message record"""
-        try:
-            session_id, user_id, message_type, content, sql_query, query_result, created_at = params
-            
-            data = {
-                "session_id": session_id,
-                "user_id": user_id,
-                "message_type": message_type,
-                "content": content,
-                "sql_query": sql_query,
-                "query_result": query_result,
-                "created_at": created_at.isoformat() if hasattr(created_at, 'isoformat') else str(created_at)
-            }
-            
-            result = self.supabase.table("chat_messages").insert(data).execute()
-            return result.data[0] if result.data else None
-            
-        except Exception as e:
-            print(f"ERROR in _insert_chat_message: {str(e)}")
-            raise
     
     async def _insert_dashboard_config(self, params: tuple) -> Optional[Dict[str, Any]]:
         """Insert dashboard config record"""
@@ -1867,9 +1746,7 @@ class DatabaseService:
     async def _execute_delete(self, query: str, params: tuple = None) -> Optional[Dict[str, Any]]:
         """Handle DELETE operations"""
         try:
-            if "DELETE FROM chat_messages" in query:
-                return await self._delete_chat_messages(params)
-            elif "DELETE FROM dashboard_configs" in query:
+            if "DELETE FROM dashboard_configs" in query:
                 return await self._delete_dashboard_config(params)
             else:
                 print(f"WARNING: Unsupported DELETE table in query: {query}")
@@ -1879,22 +1756,6 @@ class DatabaseService:
             print(f"ERROR in _execute_delete: {str(e)}")
             raise
     
-    async def _delete_chat_messages(self, params: tuple) -> Optional[Dict[str, Any]]:
-        """Delete chat messages for a session"""
-        try:
-            session_id, user_id = params
-            
-            result = self.supabase.table("chat_messages")\
-                .delete()\
-                .eq("session_id", session_id)\
-                .eq("user_id", user_id)\
-                .execute()
-                
-            return {"deleted": True, "count": len(result.data) if result.data else 0}
-            
-        except Exception as e:
-            print(f"ERROR in _delete_chat_messages: {str(e)}")
-            raise
     
     async def _delete_dashboard_config(self, params: tuple) -> Optional[Dict[str, Any]]:
         """Delete dashboard config"""

@@ -30,6 +30,30 @@ class Settings(BaseSettings):
     # Redis settings
     redis_url: str = "redis://localhost:6379"
     
+    # Database URL for LangChain (constructed from Supabase settings)
+    @property
+    def database_url(self) -> str:
+        """Construct PostgreSQL URL from Supabase URL - LEGACY, kept for compatibility"""
+        return self.supabase_url.replace('https://', 'postgresql://postgres:').replace('.supabase.co', '.supabase.co:5432') + '/postgres'
+    
+    @property
+    def langchain_database_url(self) -> str:
+        """Dedicated PostgreSQL URL for LangChain chat functionality"""
+        # First try the explicit DATABASE_URL from environment
+        import os
+        explicit_url = os.getenv("DATABASE_URL")
+        if explicit_url:
+            return explicit_url
+        
+        # Fallback: construct from Supabase settings with proper format
+        # Extract project reference from Supabase URL
+        supabase_host = self.supabase_url.replace("https://", "").replace("http://", "")
+        project_ref = supabase_host.split('.')[0]
+        
+        # Try multiple connection formats that might work with Supabase
+        # Format 1: Standard Supabase PostgreSQL connection
+        return f"postgresql://postgres:Malmo2025A!@db.{project_ref}.supabase.co:5432/postgres"
+    
     class Config:
         env_file = ".env"
         extra = "ignore"
