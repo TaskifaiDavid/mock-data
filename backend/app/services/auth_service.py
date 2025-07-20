@@ -74,7 +74,7 @@ class AuthService:
     
     async def verify_token(self, token: str) -> Optional[dict]:
         try:
-            self.logger.info(f"Attempting token verification for token starting with: {token[:20]}...")
+            self.logger.info(f"Attempting token verification for token ending with: ...{token[-4:]}")
             
             if not token:
                 self.logger.warning("Empty token provided for verification")

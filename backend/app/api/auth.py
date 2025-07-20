@@ -43,6 +43,12 @@ async def debug_token(
     auth_service: AuthService = Depends(get_auth_service)
 ):
     """Debug endpoint to check token validity and provide diagnostics"""
+    import os
+    
+    # Security: Only allow debug endpoint in development environment
+    if os.getenv("API_HOST") != "0.0.0.0" or os.getenv("ENVIRONMENT", "development") == "production":
+        raise AuthenticationException("Debug endpoint not available in production")
+    
     debug_info = {
         "timestamp": str(__import__('datetime').datetime.now()),
         "authorization_header_provided": authorization is not None,
@@ -59,7 +65,7 @@ async def debug_token(
             token = authorization.split(" ")[1]
             debug_info["token_extracted"] = True
             debug_info["token_length"] = len(token)
-            debug_info["token_preview"] = f"{token[:10]}...{token[-10:]}" if len(token) > 20 else token
+            debug_info["token_preview"] = f"***...{token[-4:]}" if len(token) > 10 else "***"
             
             user = await auth_service.verify_token(token)
             debug_info["user_found"] = user is not None
@@ -78,14 +84,14 @@ async def get_current_user(
     auth_service: AuthService = Depends(get_auth_service)
 ):
     logger.info("get_current_user called")
-    logger.info(f"Authorization header: {authorization[:50] if authorization else 'None'}...")
+    logger.info(f"Authorization header: {'Present' if authorization else 'None'}")
     
     if not authorization:
         logger.warning("No authorization header provided")
         raise AuthenticationException("Missing authorization header")
     
     if not authorization.startswith("Bearer "):
-        logger.warning(f"Invalid authorization header format: {authorization[:20]}...")
+        logger.warning("Invalid authorization header format")
         raise AuthenticationException("Invalid authorization header format")
     
     try:

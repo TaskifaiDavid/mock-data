@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Header
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 import logging
 import json
+import os
 from datetime import datetime
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
@@ -16,13 +17,22 @@ class WebhookResponse(BaseModel):
 
 @router.post("/", response_model=WebhookResponse)
 @router.post("", response_model=WebhookResponse)
-async def receive_webhook(request: Request):
+async def receive_webhook(request: Request, x_webhook_key: Optional[str] = Header(None)):
     """
     Simple webhook endpoint for Make.com integration.
-    Accepts any JSON data without authentication or email validation.
+    Accepts any JSON data with optional authentication via X-Webhook-Key header.
     Available at both /api/webhook/ and /api/webhook (with and without trailing slash).
     """
     try:
+        # Optional security: Check webhook key if configured
+        webhook_key = os.getenv("WEBHOOK_KEY")
+        if webhook_key and x_webhook_key != webhook_key:
+            logger.warning(f"Invalid webhook key from {request.client.host if request.client else 'unknown'}")
+            return WebhookResponse(
+                success=False,
+                message="Invalid webhook key",
+                timestamp=datetime.now().isoformat()
+            )
         # Get the raw request body
         body = await request.body()
         

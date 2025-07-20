@@ -50,9 +50,8 @@ class Settings(BaseSettings):
         supabase_host = self.supabase_url.replace("https://", "").replace("http://", "")
         project_ref = supabase_host.split('.')[0]
         
-        # Try multiple connection formats that might work with Supabase
-        # Format 1: Standard Supabase PostgreSQL connection
-        return f"postgresql://postgres:Malmo2025A!@db.{project_ref}.supabase.co:5432/postgres"
+        # Security: No fallback with hardcoded credentials - require DATABASE_URL
+        raise ValueError("DATABASE_URL environment variable is required for LangChain database connection")
     
     class Config:
         env_file = ".env"

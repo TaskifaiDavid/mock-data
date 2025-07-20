@@ -198,7 +198,7 @@ class SupabaseChatAgent:
                 User Question: {user_message}
                 
                 Instructions:
-                1. Analyze the data carefully and show your work
+                1. Analyze the data carefully
                 2. Provide specific numbers and calculations 
                 3. If grouping data (by reseller, product, time), show the breakdown
                 4. Format numbers with currency symbols and proper formatting
@@ -404,8 +404,6 @@ def get_database():
         # Try multiple connection approaches
         connection_attempts = [
             ("Explicit DATABASE_URL", settings.langchain_database_url),
-            ("Alternative host format", f"postgresql://postgres:Malmo2025A!@aws-0-eu-central-1.pooler.supabase.com:5432/postgres"),
-            ("Connection pooling", f"postgresql://postgres:Malmo2025A!@aws-0-eu-central-1.pooler.supabase.com:6543/postgres"),
         ]
         
         for attempt_name, db_url in connection_attempts:

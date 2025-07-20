@@ -9,7 +9,7 @@ class ApiService {
       method: options.method || 'GET',
       hasToken: !!token,
       tokenLength: token ? token.length : 0,
-      tokenPreview: token ? `${token.substring(0, 20)}...` : 'none',
+      tokenPreview: token ? `***...${token.slice(-4)}` : 'none',
       url: `${API_URL}${endpoint}`,
       timestamp: new Date().toISOString()
     }
