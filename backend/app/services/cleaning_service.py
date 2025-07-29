@@ -30,7 +30,7 @@ class CleaningService:
             logger.info(f"Updated upload {upload_id} status to PROCESSING")
             
             # Read Excel file with better debugging
-            excel_file = pd.ExcelFile(io.BytesIO(file_contents))
+            excel_file = pd.ExcelFile(io.BytesIO(file_contents), engine='openpyxl')
             logger.info(f"Excel file sheet names: {excel_file.sheet_names}")
             
             # First, detect vendor from filename and sheet names to determine correct sheet
@@ -164,9 +164,9 @@ class CleaningService:
                 logger.info(f"Sample entry for insertion: {sellout_entries[0]}")
                 
                 # Save to database
-                logger.info(f"Attempting to insert {len(sellout_entries)} entries into sellout_entries2")
-                await self.db_service.insert_sellout_entries(upload_id, sellout_entries)
-                logger.info(f"Successfully inserted {len(sellout_entries)} entries into sellout_entries2")
+                logger.info(f"Attempting to insert {len(sellout_entries)} entries into mock_data")
+                await self.db_service.insert_mock_data(upload_id, sellout_entries)
+                logger.info(f"Successfully inserted {len(sellout_entries)} entries into mock_data")
                 
                 # Log transformations
                 logger.info(f"Logging {len(transformations)} transformations")

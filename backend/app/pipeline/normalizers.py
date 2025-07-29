@@ -46,6 +46,7 @@ class DataNormalizer:
             'netsalesvalue': 'sales_eur',
             'exvatnetsales': 'sales_eur',
             'sales_lc': 'sales_lc',  # Direct mapping for local currency sales
+            'sales_eur': 'sales_eur',  # Direct mapping for EUR sales
             
             # Product name mappings
             'product_name': 'functional_name',
@@ -96,6 +97,8 @@ class DataNormalizer:
             normalized_df['reseller'] = 'Aromateque'  # Preserve proper capitalization
         elif vendor == 'galilu':
             normalized_df['reseller'] = 'Galilu'  # Proper capitalization for Galilu
+        elif vendor == 'unknown':
+            normalized_df['reseller'] = 'Demo'  # Demo reseller for unknown/mock data
         else:
             normalized_df['reseller'] = vendor.replace('_', ' ').title()
         
@@ -167,8 +170,8 @@ class DataNormalizer:
                 normalized_df['functional_name'] = normalized_df['functional_name'].str.strip()
                 print("DEBUG: Preserved original case for Galilu Polish product descriptions")
             else:
-                # For other vendors, apply title case as before
-                normalized_df['functional_name'] = normalized_df['functional_name'].str.strip().str.title()
+                # For other/unknown vendors, keep uppercase (demo data should stay uppercase)
+                normalized_df['functional_name'] = normalized_df['functional_name'].str.strip().str.upper()
         
         # Remove rows with missing essential data
         # For Liberty, product_ean will be matched later in Supabase, so don't filter it out

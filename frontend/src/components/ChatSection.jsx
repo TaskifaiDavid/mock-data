@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
+import { renderMathContent } from '../utils/mathRenderer'
 
 const ChatSection = () => {
   const [messages, setMessages] = useState([])
@@ -70,10 +71,6 @@ const ChatSection = () => {
     }
   }
 
-  const clearChat = () => {
-    setMessages([])
-  }
-
   const copyMessage = (content) => {
     navigator.clipboard.writeText(content)
   }
@@ -89,24 +86,12 @@ const ChatSection = () => {
 
   return (
     <div className="chat-section">
-      <div className="chat-header">
-        <div className="header-content">
-          <h2>💬 Data Chat</h2>
-          <p>Ask questions about your sales data and get AI-powered insights</p>
-        </div>
-        <div className="chat-actions">
-          <button onClick={clearChat} className="btn-secondary" disabled={messages.length === 0}>
-            Clear Chat
-          </button>
-        </div>
-      </div>
-
       <div className="chat-container">
         <div className="chat-messages">
           {messages.length === 0 && (
             <div className="welcome-section">
               <div className="welcome-message">
-                <h3>👋 Welcome to Data Chat!</h3>
+                <h3>👋 Welcome to Chat!</h3>
                 <p>I can help you analyze your sales data. Here are some questions you can ask:</p>
               </div>
               
@@ -138,7 +123,7 @@ const ChatSection = () => {
                 </span>
               </div>
               <div className="message-content">
-                <pre>{message.content}</pre>
+                <div className="math-content">{renderMathContent(message.content)}</div>
                 {message.type === 'ai' && (
                   <button 
                     className="copy-btn"
@@ -158,13 +143,8 @@ const ChatSection = () => {
                 <span className="message-sender">🤖 AI Assistant</span>
                 <span className="message-time">Analyzing...</span>
               </div>
-              <div className="message-content loading">
-                <div className="loading-animation">
-                  <span>Analyzing your data</span>
-                  <div className="loading-dots">
-                    <span>.</span><span>.</span><span>.</span>
-                  </div>
-                </div>
+              <div className="message-content">
+                <pre>Analyzing your data<span className="loading-dots"><span>.</span><span>.</span><span>.</span></span></pre>
               </div>
             </div>
           )}
@@ -176,11 +156,12 @@ const ChatSection = () => {
             <textarea
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
-              onKeyPress={handleKeyPress}
+              onKeyDown={handleKeyPress}
               placeholder="Ask a question about your sales data... (Press Enter to send, Shift+Enter for new line)"
               disabled={isLoading}
               rows={3}
               className="chat-input"
+              autoFocus={false}
             />
             <button 
               onClick={sendMessage} 
@@ -214,13 +195,13 @@ const ChatSection = () => {
 
         .header-content h2 {
           margin: 0 0 5px 0;
-          font-size: 24px;
+          font-size: 28px;
         }
 
         .header-content p {
           margin: 0;
           opacity: 0.9;
-          font-size: 14px;
+          font-size: 18px;
         }
 
         .chat-actions .btn-secondary {
@@ -275,13 +256,13 @@ const ChatSection = () => {
         .welcome-message h3 {
           margin: 0 0 15px 0;
           color: #333;
-          font-size: 24px;
+          font-size: 28px;
         }
 
         .welcome-message p {
           margin: 0;
           color: #666;
-          font-size: 16px;
+          font-size: 20px;
           line-height: 1.5;
         }
 
@@ -295,7 +276,7 @@ const ChatSection = () => {
         .sample-questions h4 {
           margin: 0 0 20px 0;
           color: #333;
-          font-size: 18px;
+          font-size: 22px;
         }
 
         .question-grid {
@@ -311,7 +292,7 @@ const ChatSection = () => {
           border-radius: 8px;
           cursor: pointer;
           text-align: left;
-          font-size: 14px;
+          font-size: 18px;
           transition: all 0.2s ease;
         }
 
@@ -339,7 +320,7 @@ const ChatSection = () => {
           justify-content: space-between;
           align-items: center;
           margin-bottom: 8px;
-          font-size: 12px;
+          font-size: 16px;
           color: #666;
         }
 
@@ -380,7 +361,7 @@ const ChatSection = () => {
           word-wrap: break-word;
           overflow-wrap: break-word;
           font-family: inherit;
-          font-size: 14px;
+          font-size: 18px;
           line-height: 1.5;
           max-width: 100%;
           overflow-x: auto;
@@ -448,7 +429,7 @@ const ChatSection = () => {
           padding: 12px 16px;
           resize: none;
           font-family: inherit;
-          font-size: 14px;
+          font-size: 18px;
           line-height: 1.4;
           transition: border-color 0.2s ease;
         }
@@ -468,12 +449,13 @@ const ChatSection = () => {
           color: white;
           border: none;
           border-radius: 8px;
-          padding: 12px 24px;
+          padding: 12px 42px;
           cursor: pointer;
-          font-size: 14px;
+          font-size: 18px;
           font-weight: 600;
           transition: background-color 0.2s ease;
           white-space: nowrap;
+          min-width: 140px;
         }
 
         .send-btn:disabled {

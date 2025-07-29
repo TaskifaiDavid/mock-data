@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
+import { renderMathContent } from '../utils/mathRenderer'
 
 const Chat = () => {
   const [isOpen, setIsOpen] = useState(false)
@@ -95,7 +96,7 @@ const Chat = () => {
             {messages.map((message, index) => (
               <div key={index} className={`message ${message.type}`}>
                 <div className="message-content">
-                  {message.content}
+                  {renderMathContent(message.content)}
                 </div>
               </div>
             ))}
@@ -279,9 +280,10 @@ const Chat = () => {
           color: white;
           border: none;
           border-radius: 8px;
-          padding: 10px 20px;
+          padding: 10px 35px;
           cursor: pointer;
           font-size: 14px;
+          min-width: 100px;
         }
 
         .chat-input button:disabled {

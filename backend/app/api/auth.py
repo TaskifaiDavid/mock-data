@@ -46,7 +46,7 @@ async def debug_token(
     import os
     
     # Security: Only allow debug endpoint in development environment
-    if os.getenv("API_HOST") != "0.0.0.0" or os.getenv("ENVIRONMENT", "development") == "production":
+    if os.getenv("ENVIRONMENT", "development") == "production":
         raise AuthenticationException("Debug endpoint not available in production")
     
     debug_info = {

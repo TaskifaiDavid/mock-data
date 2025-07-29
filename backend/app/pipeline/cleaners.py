@@ -1874,8 +1874,57 @@ class DataCleaner:
         return 2025, 1  # Default if parsing fails
     
     async def _clean_generic_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
+        """Clean generic/mock data that already has the correct column structure"""
         transformations = []
-        return df, transformations
+        df_clean = df.copy()
+        
+        print(f"DEBUG: Generic data cleaning - Input shape: {df_clean.shape}")
+        print(f"DEBUG: Generic data columns: {list(df_clean.columns)}")
+        
+        # Remove empty rows
+        df_clean = df_clean.dropna(how='all')
+        
+        # Basic data type conversions for expected columns
+        if 'product_ean' in df_clean.columns:
+            # Ensure EAN is string format
+            df_clean['product_ean'] = df_clean['product_ean'].astype(str)
+            
+        if 'month' in df_clean.columns:
+            # Ensure month is integer
+            df_clean['month'] = pd.to_numeric(df_clean['month'], errors='coerce')
+            
+        if 'year' in df_clean.columns:
+            # Ensure year is integer
+            df_clean['year'] = pd.to_numeric(df_clean['year'], errors='coerce')
+            
+        if 'quantity' in df_clean.columns:
+            # Ensure quantity is integer
+            df_clean['quantity'] = pd.to_numeric(df_clean['quantity'], errors='coerce')
+            
+        if 'sales_lc' in df_clean.columns:
+            # Ensure sales_lc is float
+            df_clean['sales_lc'] = pd.to_numeric(df_clean['sales_lc'], errors='coerce')
+            
+        if 'sales_eur' in df_clean.columns:
+            # Ensure sales_eur is float
+            df_clean['sales_eur'] = pd.to_numeric(df_clean['sales_eur'], errors='coerce')
+        
+        # Remove rows with invalid core data
+        initial_count = len(df_clean)
+        df_clean = df_clean.dropna(subset=['product_ean', 'month', 'year', 'quantity'])
+        final_count = len(df_clean)
+        
+        if initial_count != final_count:
+            transformations.append({
+                "transformation_type": "remove_invalid_rows",
+                "rows_removed": initial_count - final_count,
+                "original_count": initial_count,
+                "final_count": final_count
+            })
+        
+        print(f"DEBUG: Generic data cleaning complete - Output shape: {df_clean.shape}")
+        
+        return df_clean, transformations
     
     async def _apply_common_cleaning(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
         transformations = []

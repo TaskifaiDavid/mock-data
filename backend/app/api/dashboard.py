@@ -114,7 +114,7 @@ async def create_dashboard_config(
         """
         
         now = datetime.now()
-        result = await db_service.fetch_one(
+        result = await db_service.execute(
             query,
             (
                 current_user.id,
@@ -130,6 +130,10 @@ async def create_dashboard_config(
             )
         )
         
+        if not result:
+            logger.error("Database insert returned no result")
+            raise HTTPException(status_code=500, detail="Failed to create dashboard configuration")
+        
         # Return the created config
         created_config = {
             "id": result["id"],
@@ -140,8 +144,8 @@ async def create_dashboard_config(
             "authenticationConfig": config.authenticationConfig or {},
             "permissions": config.permissions or [],
             "isActive": config.isActive,
-            "createdAt": result["created_at"].isoformat(),
-            "updatedAt": result["updated_at"].isoformat()
+            "createdAt": result["created_at"] if isinstance(result["created_at"], str) else result["created_at"].isoformat(),
+            "updatedAt": result["updated_at"] if isinstance(result["updated_at"], str) else result["updated_at"].isoformat()
         }
         
         logger.info(f"Created dashboard config {result['id']} for user {current_user.email}")

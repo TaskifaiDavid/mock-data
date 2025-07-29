@@ -5,6 +5,11 @@ from app.api import auth, upload, status, email, dashboard, webhook, chat
 from app.utils.config import get_settings
 from app.utils.exceptions import AppException
 import logging
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,

@@ -220,6 +220,43 @@ class DatabaseService:
             print(f"DB Service: Full traceback: {error_details}")
             raise DatabaseException(f"Failed to insert sellout entries: {str(e)}")
     
+    async def insert_mock_data(self, upload_id: str, entries: List[Dict[str, Any]]):
+        """Insert entries directly into mock_data table"""
+        try:
+            print(f"DB Service: Starting insert_mock_data for upload {upload_id} with {len(entries)} entries")
+            
+            # Prepare entries for insertion
+            import uuid
+            mock_data_entries = []
+            for entry in entries:
+                mock_entry = {
+                    "id": str(uuid.uuid4()),  # Generate UUID for each entry
+                    "product_ean": entry.get("product_ean"),
+                    "month": entry.get("month"),
+                    "year": entry.get("year"),
+                    "quantity": entry.get("quantity"),
+                    "sales_lc": entry.get("sales_lc"),
+                    "sales_eur": entry.get("sales_eur"),
+                    "currency": entry.get("currency"),
+                    "reseller": entry.get("reseller"),
+                    "functional_name": entry.get("functional_name"),
+                    "upload_id": upload_id
+                }
+                mock_data_entries.append(mock_entry)
+            
+            print(f"DB Service: Sample mock_data entry: {mock_data_entries[0]}")
+            
+            # Insert into mock_data table
+            result = self.supabase.table("mock_data").insert(mock_data_entries).execute()
+            print(f"DB Service: Successfully inserted {len(mock_data_entries)} entries into mock_data")
+            print(f"DB Service: Insert result: {len(result.data)} records inserted")
+            
+        except Exception as e:
+            error_details = getattr(e, '__dict__', str(e))
+            print(f"DB Service: Error inserting mock data: {str(e)}")
+            print(f"DB Service: Full traceback: {error_details}")
+            raise DatabaseException(f"Failed to insert mock data: {str(e)}")
+    
     async def _ensure_products_exist(self, entries: List[Dict[str, Any]]):
         """Ensure all products exist in the products table"""
         try:
@@ -1695,7 +1732,18 @@ class DatabaseService:
             }
             
             result = self.supabase.table("dashboard_configs").insert(data).execute()
-            return result.data[0] if result.data else None
+            
+            if result.data and len(result.data) > 0:
+                created_record = result.data[0]
+                # Return a dictionary with the expected fields
+                return {
+                    "id": created_record.get("id"),
+                    "created_at": created_record.get("created_at"),
+                    "updated_at": created_record.get("updated_at")
+                }
+            else:
+                print(f"WARNING: Dashboard config insert returned no data")
+                return None
             
         except Exception as e:
             print(f"ERROR in _insert_dashboard_config: {str(e)}")
@@ -1767,9 +1815,13 @@ class DatabaseService:
                 .eq("id", config_id)\
                 .eq("user_id", user_id)\
                 .execute()
-                
-            return result.data[0] if result.data else None
             
+            if result.data and len(result.data) > 0:
+                return result.data[0]
+            else:
+                print(f"WARNING: Dashboard config {config_id} not found or not owned by user {user_id}")
+                return None
+                
         except Exception as e:
             print(f"ERROR in _delete_dashboard_config: {str(e)}")
             raise
