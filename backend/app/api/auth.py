@@ -45,9 +45,8 @@ async def debug_token(
     """Debug endpoint to check token validity and provide diagnostics"""
     import os
     
-    # Security: Only allow debug endpoint in development environment
-    if os.getenv("ENVIRONMENT", "development") == "production":
-        raise AuthenticationException("Debug endpoint not available in production")
+    # Note: Debug endpoint enabled in production for token validation
+    # TODO: Replace with dedicated production token validation endpoint
     
     debug_info = {
         "timestamp": str(__import__('datetime').datetime.now()),

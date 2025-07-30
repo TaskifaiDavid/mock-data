@@ -178,10 +178,12 @@ const ChatSection = () => {
         .chat-section {
           display: flex;
           flex-direction: column;
-          height: calc(100vh - 120px);
+          height: calc(100vh - 120px + 10vh);
           background: #f8f9fa;
           border-radius: 8px;
           overflow: hidden;
+          width: 40%;
+          margin: 0 auto;
         }
 
         .chat-header {
@@ -233,7 +235,7 @@ const ChatSection = () => {
         .chat-messages {
           flex: 1;
           overflow-y: auto;
-          max-height: calc(100vh - 280px);
+          max-height: calc(100vh - 280px + 10vh);
           padding: 20px;
           background: #fafafa;
           scroll-behavior: smooth;

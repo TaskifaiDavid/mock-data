@@ -74,22 +74,33 @@ class SupabaseSQLDatabase:
             return f"Error: {str(e)}"
     
     def get_table_info(self, table_names=None):
-        """Return table schema information"""
+        """Return table schema information for Supabase mock_data table"""
         return """
         Table: mock_data
         Columns:
-        - functional_name (text): Product name
-        - reseller (text): Reseller/customer name
+        - functional_name (text): Product name/identifier
+        - reseller (text): Reseller/customer name  
         - sales_eur (numeric): Sales amount in EUR
         - quantity (integer): Quantity sold
         - month (integer): Month (1-12)
         - year (integer): Year (e.g. 2024, 2025)
         - product_ean (text): Product EAN code
         - currency (text): Currency code
-        - upload_id (uuid): Reference to upload
+        - upload_id (uuid): Reference to upload record
+        - created_at (timestamp): When record was created
         
-        Sample data:
-        functional_name='PRSP100', reseller='Galilu', sales_eur=298.63, quantity=15, month=11, year=2025
+        Table: uploads
+        Columns:
+        - id (uuid): Upload ID
+        - user_id (text): User who uploaded the file
+        - filename (text): Original filename
+        - status (text): Processing status
+        - uploaded_at (timestamp): Upload timestamp
+        - rows_processed (integer): Number of rows processed
+        - rows_cleaned (integer): Number of rows after cleaning
+        
+        Sample mock_data record:
+        functional_name='PRSP100 Premium Headphones', reseller='Galilu Electronics', sales_eur=1298.50, quantity=15, month=3, year=2024, product_ean='1234567890123', currency='EUR'
         """
     
     @property
@@ -800,37 +811,36 @@ _supabase_db_service = None
 
 def get_database():
     """Get or create database connection for LangChain chat functionality"""
-    global _db
+    global _db, _use_supabase_fallback, _supabase_db_service
     if _db is None:
         settings = get_settings()
         
-        # Try multiple connection approaches
-        connection_attempts = [
-            ("Explicit DATABASE_URL", settings.langchain_database_url),
-        ]
-        
-        for attempt_name, db_url in connection_attempts:
+        # Check if we have real Supabase credentials
+        if settings.environment != "development" and "placeholder" not in settings.supabase_url:
+            # Try to connect to real Supabase PostgreSQL database
             try:
-                logger.info(f"Attempting database connection using: {attempt_name}")
-                logger.info(f"Connection string format: {db_url[:50]}...")
+                # Construct PostgreSQL URL from Supabase settings
+                supabase_host = settings.supabase_url.replace("https://", "").replace("http://", "")
+                project_ref = supabase_host.split('.')[0]
+                # Note: This would need real PostgreSQL credentials, not just REST API credentials
+                postgres_url = f"postgresql://postgres:[password]@db.{project_ref}.supabase.co:5432/postgres"
                 
-                _db = SQLDatabase.from_uri(db_url)
+                logger.info(f"Attempting to connect to Supabase PostgreSQL database")
+                _db = SQLDatabase.from_uri(postgres_url)
                 
                 # Test the connection
                 test_result = _db.run("SELECT 1 as test")
-                logger.info(f"Database connection successful with {attempt_name}")
+                logger.info(f"Supabase PostgreSQL connection successful")
                 logger.info(f"Test query result: {test_result}")
                 
                 return _db
                 
             except Exception as e:
-                logger.warning(f"Connection attempt '{attempt_name}' failed: {str(e)}")
-                _db = None
-                continue
+                logger.warning(f"Direct PostgreSQL connection failed: {str(e)}")
+                logger.info("Falling back to Supabase REST API mode")
         
-        # If all direct connections fail, use Supabase REST API fallback
-        logger.warning("All direct PostgreSQL connections failed. Using Supabase REST API fallback for chat.")
-        global _use_supabase_fallback, _supabase_db_service
+        # Use Supabase REST API fallback (works with existing DatabaseService)
+        logger.info("Using Supabase REST API fallback for chat functionality")
         _use_supabase_fallback = True
         _supabase_db_service = DatabaseService()
         
@@ -843,7 +853,7 @@ def get_database():
 def get_agent():
     """Get or create SQL agent"""
     global _agent_executor, _use_supabase_fallback
-    # Force recreation of agent to pick up new system message
+    # Force recreation of agent to pick up new system message   
     _agent_executor = None
     if _agent_executor is None:
         settings = get_settings()
@@ -860,13 +870,8 @@ def get_agent():
             openai_api_key=settings.openai_api_key
         )
         
-        # Always use the enhanced SupabaseChatAgent for consistent percentage calculations
-        # regardless of connection type (direct PostgreSQL or Supabase REST API)
-        if _use_supabase_fallback:
-            logger.info("Creating enhanced SupabaseChatAgent with Supabase REST API")
-        else:
-            logger.info("Creating enhanced SupabaseChatAgent with direct PostgreSQL connection")
-        
+        # Use the enhanced SupabaseChatAgent that can work with mock_data table
+        logger.info("Creating enhanced SupabaseChatAgent for mock_data table")
         _agent_executor = SupabaseChatAgent(llm, db)
         
         logger.info("SQL agent initialized")
@@ -876,10 +881,15 @@ def get_agent():
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_data(request: ChatRequest, authorization: str = Header(None), settings=Depends(get_settings)):
     """
-    Enhanced chat endpoint with proper user authentication and debug mode
+    Chat endpoint using enhanced SupabaseChatAgent with user authentication
     """
     try:
-        # Extract user ID from JWT token
+        # Check if we have a valid OpenAI API key
+        if not settings.openai_api_key or "placeholder" in settings.openai_api_key:
+            logger.warning("No valid OpenAI API key found, using mock responses")
+            return ChatResponse(answer="I need an OpenAI API key to provide intelligent responses. Please configure your API key in the environment variables.")
+        
+        # Extract user ID from JWT token for data filtering
         from app.services.auth_service import AuthService
         
         user_id = None
@@ -911,7 +921,7 @@ async def chat_with_data(request: ChatRequest, authorization: str = Header(None)
         # Get the SQL agent
         agent = get_agent()
         
-        # Enhanced input with user context
+        # Enhanced input with user context for filtering
         enhanced_input = {
             "input": request.message,
             "user_id": user_id  # Pass user ID to agent for filtering
@@ -922,13 +932,16 @@ async def chat_with_data(request: ChatRequest, authorization: str = Header(None)
             response = agent.invoke(enhanced_input)
             # Extract the output from the response
             if isinstance(response, dict) and "output" in response:
-                response = response["output"]
-        except AttributeError:
-            # Fallback to older run method (won't have user filtering)
-            response = agent.run(request.message)
+                answer = response["output"]
+            else:
+                answer = str(response)
+        except Exception as agent_error:
+            logger.error(f"Agent error: {str(agent_error)}")
+            # Fallback to run method (won't have user filtering)
+            answer = agent.run(request.message)
         
-        logger.info(f"Agent response generated successfully: {len(response)} characters")
-        return ChatResponse(answer=response)
+        logger.info(f"Agent response generated successfully: {len(answer)} characters")
+        return ChatResponse(answer=answer)
         
     except Exception as e:
         logger.error(f"Chat processing failed: {e}")

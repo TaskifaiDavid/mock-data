@@ -11,16 +11,54 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Global mock data storage for development mode
+_mock_uploads = {}
+_mock_data = {
+    "products": [
+        {"id": 1, "name": "Test Product 1", "price": 10.99, "category": "Electronics"},
+        {"id": 2, "name": "Test Product 2", "price": 25.50, "category": "Books"},
+        {"id": 3, "name": "Test Product 3", "price": 15.75, "category": "Clothing"}
+    ]
+}
+
 class DatabaseService:
     def __init__(self):
         settings = get_settings()
-        self.supabase: Client = create_client(
-            settings.supabase_url,
-            settings.supabase_service_key
-        )
+        self.logger = logging.getLogger(__name__)
+        
+        # Development mode - use mock database
+        if settings.environment == "development" or "placeholder" in settings.supabase_url:
+            self.logger.info("Running DatabaseService in development mode - using mock data")
+            self.supabase = None
+            self.dev_mode = True
+            # Use global mock data storage to persist between requests
+            global _mock_uploads, _mock_data
+            self.mock_uploads = _mock_uploads
+            self.mock_data = _mock_data
+        else:
+            self.supabase: Client = create_client(
+                settings.supabase_url,
+                settings.supabase_service_key
+            )
+            self.dev_mode = False
     
     async def create_upload_record(self, upload_id: str, user_id: str, filename: str, file_size: int):
         try:
+            if self.dev_mode:
+                # Development mode - store in mock data
+                data = {
+                    "id": upload_id,
+                    "user_id": user_id,
+                    "filename": filename,
+                    "file_size": file_size,
+                    "status": UploadStatus.PENDING.value,
+                    "created_at": datetime.now().isoformat()
+                }
+                self.mock_uploads[upload_id] = data
+                self.logger.info(f"Created mock upload record: {upload_id}")
+                return data
+            
+            # Production mode - use Supabase
             data = {
                 "id": upload_id,
                 "user_id": user_id,
@@ -60,6 +98,21 @@ class DatabaseService:
     
     async def get_upload_status(self, upload_id: str, user_id: str) -> Optional[ProcessingStatus]:
         try:
+            if self.dev_mode:
+                # Development mode - return mock data
+                upload_data = self.mock_uploads.get(upload_id)
+                if upload_data and upload_data["user_id"] == user_id:
+                    return ProcessingStatus(
+                        upload_id=upload_data["id"],
+                        status=UploadStatus(upload_data["status"]),
+                        message=upload_data.get("error_message"),
+                        rows_processed=upload_data.get("rows_processed", 100),
+                        rows_cleaned=upload_data.get("rows_cleaned", 95),
+                        processing_time_ms=upload_data.get("processing_time_ms", 1500)
+                    )
+                return None
+            
+            # Production mode - use Supabase
             result = self.supabase.table("uploads").select("*").eq("id", upload_id).eq("user_id", user_id).single().execute()
             
             if result.data:
@@ -333,6 +386,14 @@ class DatabaseService:
     async def get_user_uploads(self, user_id: str) -> List[Dict[str, Any]]:
         """Get all uploads for a specific user"""
         try:
+            if self.dev_mode:
+                # Development mode - return mock uploads for this user
+                user_uploads = [upload for upload in self.mock_uploads.values() if upload["user_id"] == user_id]
+                # Sort by created_at descending
+                user_uploads.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+                return user_uploads
+            
+            # Production mode - use Supabase
             result = self.supabase.table("uploads").select("*").eq("user_id", user_id).order("uploaded_at", desc=True).execute()
             return result.data if result.data else []
         except Exception as e:

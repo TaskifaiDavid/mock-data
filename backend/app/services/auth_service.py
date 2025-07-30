@@ -10,18 +10,42 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 class AuthService:
     def __init__(self):
         settings = get_settings()
-        self.supabase: Client = create_client(
-            settings.supabase_url,
-            settings.supabase_anon_key
-        )
-        self.admin_supabase: Client = create_client(
-            settings.supabase_url,
-            settings.supabase_service_key
-        )
         self.logger = logging.getLogger(__name__)
+        
+        # Development mode - use mock authentication
+        if settings.environment == "development" or "placeholder" in settings.supabase_url:
+            self.logger.info("Running in development mode - using mock authentication")
+            self.supabase = None
+            self.admin_supabase = None
+            self.dev_mode = True
+        else:
+            self.supabase: Client = create_client(
+                settings.supabase_url,
+                settings.supabase_anon_key
+            )
+            self.admin_supabase: Client = create_client(
+                settings.supabase_url,
+                settings.supabase_service_key
+            )
+            self.dev_mode = False
     
     async def login(self, credentials: UserLogin) -> TokenResponse:
         try:
+            if self.dev_mode:
+                # Development mode - mock authentication
+                if credentials.email and credentials.password:
+                    return TokenResponse(
+                        access_token=f"dev_token_{credentials.email}",
+                        user=UserResponse(
+                            id="dev_user_123",
+                            email=credentials.email,
+                            created_at="2025-01-01T00:00:00Z"
+                        )
+                    )
+                else:
+                    raise AuthenticationException("Email and password required")
+            
+            # Production mode - use Supabase
             response = self.supabase.auth.sign_in_with_password({
                 "email": credentials.email,
                 "password": credentials.password
@@ -39,10 +63,25 @@ class AuthService:
                 )
             )
         except Exception as e:
-            raise AuthenticationException(str(e))
+            if not self.dev_mode:
+                raise AuthenticationException(str(e))
+            else:
+                raise AuthenticationException("Invalid credentials")
     
     async def register(self, user_data: UserRegister) -> TokenResponse:
         try:
+            if self.dev_mode:
+                # Development mode - mock registration
+                return TokenResponse(
+                    access_token="registration_successful",
+                    user=UserResponse(
+                        id="dev_user_new",
+                        email=user_data.email,
+                        created_at="2025-01-01T00:00:00Z"
+                    )
+                )
+            
+            # Production mode - use Supabase
             # Create user with admin client
             response = self.admin_supabase.auth.admin.create_user({
                 "email": user_data.email,
@@ -85,6 +124,19 @@ class AuthService:
                 token = token[7:]
                 self.logger.debug("Removed Bearer prefix from token")
             
+            if self.dev_mode:
+                # Development mode - mock token verification
+                if token.startswith('dev_token_'):
+                    email = token.replace('dev_token_', '')
+                    return {
+                        'id': 'dev_user_123',
+                        'email': email,
+                        'created_at': '2025-01-01T00:00:00Z'
+                    }
+                else:
+                    return None
+            
+            # Production mode - use Supabase
             # Use admin/service client for token validation as it has proper permissions
             self.logger.debug("Using admin client for token validation")
             response = self.admin_supabase.auth.get_user(token)

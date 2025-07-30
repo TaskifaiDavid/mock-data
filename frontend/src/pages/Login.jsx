@@ -15,7 +15,8 @@ function Login({ onLoginSuccess }) {
     try {
       console.log('Attempting login with backend API...')
       
-      // Use backend API for login
+      // Use backend API for login (direct connection)
+      // Alternative: Use '/api/auth/login' for Vite proxy if direct connection fails
       const response = await fetch('http://localhost:8000/api/auth/login', {
         method: 'POST',
         headers: {
@@ -27,10 +28,16 @@ function Login({ onLoginSuccess }) {
         }),
       })
 
+      console.log('Response status:', response.status)
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()))
+      
       const data = await response.json()
+      console.log('Response data:', data)
 
       if (!response.ok) {
-        throw new Error(data.error || 'Login failed')
+        console.error('Login failed with status:', response.status)
+        console.error('Error data:', data)
+        throw new Error(data.error || data.detail || `Login failed (${response.status})`)
       }
 
       console.log('Login successful:', { 
@@ -52,8 +59,21 @@ function Login({ onLoginSuccess }) {
         throw new Error('No access token received')
       }
     } catch (error) {
-      console.error('Login error:', error)
-      setError(error.message)
+      console.error('Login error details:', {
+        message: error.message,
+        name: error.name,
+        stack: error.stack
+      })
+      
+      // Provide more specific error messages
+      let errorMessage = error.message
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        errorMessage = 'Unable to connect to server. Please check if the backend is running on http://localhost:8000'
+      } else if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
+        errorMessage = 'Network error: Cannot reach the login server'
+      }
+      
+      setError(errorMessage)
     } finally {
       setLoading(false)
     }

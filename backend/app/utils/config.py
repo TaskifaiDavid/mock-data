@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     jwt_expiration_minutes: int = 60
     max_upload_size: int = 10 * 1024 * 1024  # 10MB
     allowed_extensions: str = ".xlsx"
+    environment: str = "development"  # Add environment field
     
     # Email settings
     smtp_host: str = "smtp.gmail.com"

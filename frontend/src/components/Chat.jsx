@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { renderMathContent } from '../utils/mathRenderer'
+import apiService from '../services/api'
 
 const Chat = () => {
   const [isOpen, setIsOpen] = useState(false)
@@ -25,21 +26,13 @@ const Chat = () => {
     setIsLoading(true)
 
     try {
-      const token = localStorage.getItem('access_token')
-      const response = await fetch('http://localhost:8000/api/chat', {
+      const data = await apiService.request('/api/chat', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ message: inputMessage })
       })
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-      }
-
-      const data = await response.json()
       const aiMessage = { type: 'ai', content: data.answer }
       setMessages(prev => [...prev, aiMessage])
     } catch (error) {

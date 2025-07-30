@@ -110,6 +110,18 @@ const AnalyticsDashboard = () => {
     }))
   }
 
+
+  const handleOpenInLookerStudio = (dashboard) => {
+    // Convert embed URL back to regular Looker Studio URL for manual refresh
+    let originalUrl = dashboard.dashboardUrl
+    if (originalUrl.includes('/embed/reporting/')) {
+      originalUrl = originalUrl.replace('/embed/reporting/', '/reporting/')
+    }
+    // Remove any cache-busting parameters
+    originalUrl = originalUrl.split('?')[0]
+    window.open(originalUrl, '_blank')
+  }
+
   const DashboardConfigForm = () => (
     <div className="dashboard-form">
       <h3>Add Google Looker Studio Dashboard</h3>
@@ -171,10 +183,12 @@ const AnalyticsDashboard = () => {
   const DashboardViewer = ({ dashboard }) => {
     const [iframeLoading, setIframeLoading] = useState(true)
     const [iframeError, setIframeError] = useState(false)
+    const [lastRefreshed, setLastRefreshed] = useState(new Date())
 
     const handleIframeLoad = () => {
       setIframeLoading(false)
       setIframeError(false)
+      setLastRefreshed(new Date())
     }
 
     const handleIframeError = () => {
@@ -203,9 +217,13 @@ const AnalyticsDashboard = () => {
 
     return (
       <div className="dashboard-viewer">
-        <div className="viewer-header">
-          <h3>{dashboard.dashboardName}</h3>
-          <span className="dashboard-type">Google Looker Studio</span>
+        <div className="viewer-header" style={{ marginBottom: '0.5rem', padding: '0.5rem 0' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h3 style={{ margin: '0 0 0.25rem 0', fontSize: '1.2rem' }}>{dashboard.dashboardName}</h3>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Google Looker Studio • Data refreshes automatically every 12 hours</span>
+            </div>
+          </div>
         </div>
         
         {iframeLoading && (
@@ -242,15 +260,16 @@ const AnalyticsDashboard = () => {
         <iframe
           src={embedUrl}
           width="100%"
-          height="800"
+          height="900"
           frameBorder="0"
           onLoad={handleIframeLoad}
           onError={handleIframeError}
+          className="dashboard-iframe"
           style={{ 
             display: iframeError ? 'none' : 'block',
             borderRadius: '8px',
             boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-            aspectRatio: '1400/1080'
+            minHeight: '900px'
           }}
           allow="fullscreen"
           title={dashboard.dashboardName}
@@ -271,9 +290,9 @@ const AnalyticsDashboard = () => {
 
   return (
     <div className="analytics-dashboard">
-      <div className="dashboard-header">
+      <div className="dashboard-header" style={{ padding: '1rem 0', marginBottom: '1rem' }}>
         <div className="header-left">
-          <h2>Google Looker Studio</h2>
+          <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.5rem' }}>Google Looker Studio</h2>
           {dashboards.length > 0 && (
             <select 
               value={activeDashboard?.id || ''} 
@@ -319,6 +338,9 @@ const AnalyticsDashboard = () => {
         <div className="empty-state">
           <h3>No Google Looker Studio Dashboards</h3>
           <p>Connect your Google Looker Studio dashboards to view analytics and insights directly in TaskifAI.</p>
+          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginTop: '1rem' }}>
+            Note: Data in embedded dashboards refreshes automatically every 12 hours. For immediate data refresh, use the "Open in Looker Studio" button to manually refresh in the original dashboard.
+          </p>
           <button onClick={() => setShowAddForm(true)} className="btn-primary">
             Add Google Looker Studio Dashboard
           </button>
@@ -327,7 +349,14 @@ const AnalyticsDashboard = () => {
         <>
           {activeDashboard && (
             <div className="dashboard-management">
-              <div className="dashboard-actions">
+              <div className="dashboard-actions" style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+                <button
+                  className="delete-dashboard-btn"
+                  onClick={() => handleOpenInLookerStudio(activeDashboard)}
+                  title="Open in Looker Studio to manually refresh data (Ctrl+Shift+E)"
+                >
+                  🔗 Open in Looker Studio
+                </button>
                 <button
                   className="delete-dashboard-btn"
                   onClick={() => handleDeleteDashboard(activeDashboard.id)}
