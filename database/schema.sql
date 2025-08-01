@@ -70,6 +70,8 @@ CREATE INDEX IF NOT EXISTS idx_sellout_entries2_product_ean ON public.sellout_en
 CREATE INDEX IF NOT EXISTS idx_sellout_entries2_reseller ON public.sellout_entries2(reseller);
 CREATE INDEX IF NOT EXISTS idx_transform_logs_upload_id ON public.transform_logs(upload_id);
 CREATE INDEX IF NOT EXISTS idx_mock_data_upload_id ON public.mock_data(upload_id);
+CREATE INDEX IF NOT EXISTS idx_processing_logs_upload_id ON public.processing_logs(upload_id);
+CREATE INDEX IF NOT EXISTS idx_processing_logs_created_at ON public.processing_logs(created_at);
 
 -- Add upload_id column to sellout_entries2 if it doesn't exist
 ALTER TABLE public.sellout_entries2 
@@ -88,6 +90,18 @@ CREATE TABLE IF NOT EXISTS public.mock_data (
   currency text,
   reseller text,
   functional_name text,
+  sales_date date null,
+  created_at timestamptz DEFAULT now()
+);
+
+-- Processing logs table for detailed step-by-step tracking
+CREATE TABLE IF NOT EXISTS public.processing_logs (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  upload_id uuid REFERENCES public.uploads(id) ON DELETE CASCADE,
+  step_name text NOT NULL,
+  step_status text CHECK (step_status IN ('started', 'completed', 'failed')),
+  message text,
+  details jsonb,
   created_at timestamptz DEFAULT now()
 );
 
@@ -99,6 +113,7 @@ ALTER TABLE public.sellout_entries2 ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transform_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.mock_data ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.processing_logs ENABLE ROW LEVEL SECURITY;
 
 -- Users can only see their own data
 CREATE POLICY "Users can view own profile" ON public.users
@@ -171,6 +186,19 @@ CREATE POLICY "Users can view own mock data" ON public.mock_data
   );
 
 CREATE POLICY "Service role can manage mock data" ON public.mock_data
+  FOR ALL USING (auth.role() = 'service_role');
+
+-- Processing logs policies
+CREATE POLICY "Users can view own processing logs" ON public.processing_logs
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM public.uploads
+      WHERE uploads.id = processing_logs.upload_id
+      AND uploads.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "Service role can manage processing logs" ON public.processing_logs
   FOR ALL USING (auth.role() = 'service_role');
 
 -- Function to automatically create user record when user signs up

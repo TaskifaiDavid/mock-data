@@ -130,8 +130,8 @@ class DatabaseService:
                     self.logger.info(f"Updated mock upload status: {upload_id} -> {status.value}")
                 return
             
-            # Production mode - use Supabase    
-            self.supabase.table("uploads").update(update_data).eq("id", upload_id).execute()
+            # Production mode - use Supabase with service role for background processing
+            self.service_supabase.table("uploads").update(update_data).eq("id", upload_id).execute()
         except Exception as e:
             raise DatabaseException(f"Failed to update upload status: {str(e)}")
     
@@ -141,13 +141,17 @@ class DatabaseService:
                 # Development mode - return mock data
                 upload_data = self.mock_uploads.get(upload_id)
                 if upload_data and upload_data["user_id"] == user_id:
+                    # Get processing logs
+                    processing_logs = await self.get_processing_logs(upload_id, user_id)
+                    
                     return ProcessingStatus(
                         upload_id=upload_data["id"],
                         status=UploadStatus(upload_data["status"]),
                         message=upload_data.get("error_message"),
                         rows_processed=upload_data.get("rows_processed", 100),
                         rows_cleaned=upload_data.get("rows_cleaned", 95),
-                        processing_time_ms=upload_data.get("processing_time_ms", 1500)
+                        processing_time_ms=upload_data.get("processing_time_ms", 1500),
+                        processing_logs=processing_logs
                     )
                 return None
             
@@ -155,13 +159,17 @@ class DatabaseService:
             result = self.supabase.table("uploads").select("*").eq("id", upload_id).eq("user_id", user_id).single().execute()
             
             if result.data:
+                # Get processing logs
+                processing_logs = await self.get_processing_logs(upload_id, user_id)
+                
                 return ProcessingStatus(
                     upload_id=result.data["id"],
                     status=UploadStatus(result.data["status"]),
                     message=result.data.get("error_message"),
                     rows_processed=result.data.get("rows_processed"),
                     rows_cleaned=result.data.get("rows_cleaned"),
-                    processing_time_ms=result.data.get("processing_time_ms")
+                    processing_time_ms=result.data.get("processing_time_ms"),
+                    processing_logs=processing_logs
                 )
             return None
         except Exception:
@@ -319,8 +327,19 @@ class DatabaseService:
             
             # Prepare entries for insertion
             import uuid
+            from datetime import datetime
             mock_data_entries = []
             for entry in entries:
+                # Calculate sales_date from year and month (first day of month)
+                sales_date = None
+                year = entry.get("year")
+                month = entry.get("month")
+                if year and month:
+                    try:
+                        sales_date = datetime(int(year), int(month), 1).date().isoformat()
+                    except (ValueError, TypeError):
+                        sales_date = None
+                
                 mock_entry = {
                     "id": str(uuid.uuid4()),  # Generate UUID for each entry
                     "product_ean": entry.get("product_ean"),
@@ -332,6 +351,7 @@ class DatabaseService:
                     "currency": entry.get("currency"),
                     "reseller": entry.get("reseller"),
                     "functional_name": entry.get("functional_name"),
+                    "sales_date": sales_date,
                     "upload_id": upload_id
                 }
                 mock_data_entries.append(mock_entry)
@@ -347,8 +367,8 @@ class DatabaseService:
                 print(f"DB Service: Total mock data entries: {len(self.mock_data['mock_data'])}")
                 return
             
-            # Production mode - use Supabase
-            result = self.supabase.table("mock_data").insert(mock_data_entries).execute()
+            # Production mode - use Supabase with service role to bypass RLS
+            result = self.service_supabase.table("mock_data").insert(mock_data_entries).execute()
             print(f"DB Service: Successfully inserted {len(mock_data_entries)} entries into mock_data")
             print(f"DB Service: Insert result: {len(result.data)} records inserted")
             
@@ -462,10 +482,12 @@ class DatabaseService:
                 user_uploads.sort(key=lambda x: x.get("created_at", ""), reverse=True)
                 return user_uploads
             
-            # Production mode - use Supabase
-            result = self.supabase.table("uploads").select("*").eq("user_id", user_id).order("uploaded_at", desc=True).execute()
+            # Production mode - use service role to bypass RLS, but filter by user_id for security
+            result = self.service_supabase.table("uploads").select("*").eq("user_id", user_id).order("uploaded_at", desc=True).execute()
+            self.logger.info(f"📊 DB Service: Query for user {user_id[:8]}... returned {len(result.data)} uploads")
             return result.data if result.data else []
         except Exception as e:
+            self.logger.error(f"❌ DB Service: Failed to get user uploads: {str(e)}")
             raise DatabaseException(f"Failed to get user uploads: {str(e)}")
 
     async def debug_products_table(self):
@@ -707,6 +729,61 @@ class DatabaseService:
         except Exception:
             # Log transformation failures are non-critical
             pass
+    
+    async def log_processing_step(
+        self,
+        upload_id: str, 
+        step_name: str, 
+        step_status: str, 
+        message: str = None, 
+        details: dict = None
+    ):
+        """Log a processing step for detailed status tracking"""
+        try:
+            data = {
+                "upload_id": upload_id,
+                "step_name": step_name,
+                "step_status": step_status,
+                "message": message,
+                "details": details
+            }
+            
+            if self.dev_mode:
+                # Development mode - store in mock data
+                if "processing_logs" not in self.mock_data:
+                    self.mock_data["processing_logs"] = []
+                self.mock_data["processing_logs"].append(data)
+                self.logger.info(f"Processing Step: {step_name} - {step_status} - {message}")
+                return
+                
+            # Production mode - use service role to bypass RLS
+            self.service_supabase.table("processing_logs").insert(data).execute()
+            self.logger.info(f"Processing Step Logged: {step_name} - {step_status}")
+        except Exception as e:
+            # Processing log failures are non-critical
+            self.logger.warning(f"Failed to log processing step: {str(e)}")
+            pass
+    
+    async def get_processing_logs(self, upload_id: str, user_id: str) -> List[Dict[str, Any]]:
+        """Get processing logs for an upload"""
+        try:
+            if self.dev_mode:
+                # Development mode - return mock logs
+                logs = self.mock_data.get("processing_logs", [])
+                user_logs = [log for log in logs if log["upload_id"] == upload_id]
+                return sorted(user_logs, key=lambda x: x.get("created_at", ""))
+            
+            # Production mode - use Supabase with user filtering via RLS
+            result = self.supabase.table("processing_logs")\
+                .select("*")\
+                .eq("upload_id", upload_id)\
+                .order("created_at")\
+                .execute()
+            
+            return result.data if result.data else []
+        except Exception as e:
+            self.logger.error(f"Failed to get processing logs: {str(e)}")
+            return []
     
     async def _ensure_user_record_exists(self, user_id: str):
         """Ensure user record exists in public.users table by fetching from auth.users if needed"""
