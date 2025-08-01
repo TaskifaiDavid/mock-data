@@ -69,10 +69,27 @@ CREATE INDEX IF NOT EXISTS idx_sellout_entries2_upload_id ON public.sellout_entr
 CREATE INDEX IF NOT EXISTS idx_sellout_entries2_product_ean ON public.sellout_entries2(product_ean);
 CREATE INDEX IF NOT EXISTS idx_sellout_entries2_reseller ON public.sellout_entries2(reseller);
 CREATE INDEX IF NOT EXISTS idx_transform_logs_upload_id ON public.transform_logs(upload_id);
+CREATE INDEX IF NOT EXISTS idx_mock_data_upload_id ON public.mock_data(upload_id);
 
 -- Add upload_id column to sellout_entries2 if it doesn't exist
 ALTER TABLE public.sellout_entries2 
 ADD COLUMN IF NOT EXISTS upload_id uuid REFERENCES public.uploads(id) ON DELETE SET NULL;
+
+-- Mock data table for cleaned and processed entries
+CREATE TABLE IF NOT EXISTS public.mock_data (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  upload_id uuid REFERENCES public.uploads(id) ON DELETE CASCADE,
+  product_ean text,
+  month integer,
+  year integer,
+  quantity integer,
+  sales_lc text,
+  sales_eur numeric,
+  currency text,
+  reseller text,
+  functional_name text,
+  created_at timestamptz DEFAULT now()
+);
 
 
 -- RLS (Row Level Security) policies
@@ -81,6 +98,7 @@ ALTER TABLE public.uploads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sellout_entries2 ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transform_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.mock_data ENABLE ROW LEVEL SECURITY;
 
 -- Users can only see their own data
 CREATE POLICY "Users can view own profile" ON public.users
@@ -141,6 +159,34 @@ CREATE POLICY "Anyone can view products" ON public.products
 -- Service role can manage products
 CREATE POLICY "Service role can manage products" ON public.products
   FOR ALL USING (auth.role() = 'service_role');
+
+-- Mock data policies
+CREATE POLICY "Users can view own mock data" ON public.mock_data
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM public.uploads
+      WHERE uploads.id = mock_data.upload_id
+      AND uploads.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "Service role can manage mock data" ON public.mock_data
+  FOR ALL USING (auth.role() = 'service_role');
+
+-- Function to automatically create user record when user signs up
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public.users (id, email, created_at, updated_at)
+  VALUES (new.id, new.email, now(), now());
+  RETURN new;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger to automatically create user record when user is created in auth.users
+CREATE OR REPLACE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
 
 
 -- RPC function to execute raw SQL queries (for chat functionality)

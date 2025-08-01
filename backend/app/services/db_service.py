@@ -22,12 +22,14 @@ _mock_data = {
 }
 
 class DatabaseService:
-    def __init__(self):
+    def __init__(self, user_token: str = None):
         settings = get_settings()
         self.logger = logging.getLogger(__name__)
+        self.user_token = user_token
         
         # Development mode - use mock database
-        if settings.environment == "development" or "placeholder" in settings.supabase_url:
+        # Only use mock mode if Supabase URL contains placeholder
+        if "placeholder" in settings.supabase_url:
             self.logger.info("Running DatabaseService in development mode - using mock data")
             self.supabase = None
             self.dev_mode = True
@@ -36,10 +38,21 @@ class DatabaseService:
             self.mock_uploads = _mock_uploads
             self.mock_data = _mock_data
         else:
+            # Create clients with proper API keys
             self.supabase: Client = create_client(
+                settings.supabase_url,
+                settings.supabase_anon_key
+            )
+            self.service_supabase: Client = create_client(
                 settings.supabase_url,
                 settings.supabase_service_key
             )
+            
+            # Set up headers for user authentication  
+            if user_token:
+                # Set authorization header in client options - this is the correct way
+                self.supabase.options.headers["Authorization"] = f"Bearer {user_token}"
+            
             self.dev_mode = False
     
     async def create_upload_record(self, upload_id: str, user_id: str, filename: str, file_size: int):
@@ -58,7 +71,11 @@ class DatabaseService:
                 self.logger.info(f"Created mock upload record: {upload_id}")
                 return data
             
-            # Production mode - use Supabase
+            # Production mode - use Supabase  
+            # First, ensure the user record exists in public.users
+            await self._ensure_user_record_exists(user_id)
+            
+            # Use the provided upload_id to ensure consistency with file storage
             data = {
                 "id": upload_id,
                 "user_id": user_id,
@@ -67,8 +84,22 @@ class DatabaseService:
                 "status": UploadStatus.PENDING.value
             }
             
-            self.supabase.table("uploads").insert(data).execute()
+            # Use service_role to bypass RLS since we've already authenticated the user
+            # The upload endpoint already validates the user through get_current_user
+            self.logger.info("Attempting to create upload record with service role (bypassing RLS)")
+            result = self.service_supabase.table("uploads").insert(data).execute()
+            
+            self.logger.info(f"Data being inserted: {data}")
+            self.logger.info(f"Created upload record in Supabase with upload_id: {upload_id}")
+            return result.data[0] if result.data else None
         except Exception as e:
+            self.logger.error(f"Database error creating upload record: {str(e)}")
+            self.logger.error(f"Upload data: {data}")
+            # Check if it's a Supabase-specific error with more details
+            if hasattr(e, 'details'):
+                self.logger.error(f"Supabase error details: {e.details}")
+            if hasattr(e, 'message'):
+                self.logger.error(f"Supabase error message: {e.message}")
             raise DatabaseException(f"Failed to create upload record: {str(e)}")
     
     async def update_upload_status(
@@ -92,6 +123,14 @@ class DatabaseService:
             if processing_time_ms is not None:
                 update_data["processing_time_ms"] = processing_time_ms
             
+            if self.dev_mode:
+                # Development mode - update mock data
+                if upload_id in self.mock_uploads:
+                    self.mock_uploads[upload_id].update(update_data)
+                    self.logger.info(f"Updated mock upload status: {upload_id} -> {status.value}")
+                return
+            
+            # Production mode - use Supabase    
             self.supabase.table("uploads").update(update_data).eq("id", upload_id).execute()
         except Exception as e:
             raise DatabaseException(f"Failed to update upload status: {str(e)}")
@@ -299,7 +338,16 @@ class DatabaseService:
             
             print(f"DB Service: Sample mock_data entry: {mock_data_entries[0]}")
             
-            # Insert into mock_data table
+            if self.dev_mode:
+                # Development mode - store in mock data storage
+                if "mock_data" not in self.mock_data:
+                    self.mock_data["mock_data"] = []
+                self.mock_data["mock_data"].extend(mock_data_entries)
+                print(f"DB Service: Successfully inserted {len(mock_data_entries)} entries into mock data storage")
+                print(f"DB Service: Total mock data entries: {len(self.mock_data['mock_data'])}")
+                return
+            
+            # Production mode - use Supabase
             result = self.supabase.table("mock_data").insert(mock_data_entries).execute()
             print(f"DB Service: Successfully inserted {len(mock_data_entries)} entries into mock_data")
             print(f"DB Service: Insert result: {len(result.data)} records inserted")
@@ -326,8 +374,29 @@ class DatabaseService:
             if not eans:
                 print("DB Service: No EANs found, skipping product creation")
                 return
+                
+            if self.dev_mode:
+                # Development mode - ensure products exist in mock data
+                if "products" not in self.mock_data:
+                    self.mock_data["products"] = []
+                
+                existing_eans = {p["ean"] for p in self.mock_data["products"]}
+                missing_eans = eans - existing_eans
+                
+                print(f"DB Service: [DEV] Found {len(existing_eans)} existing products, {len(missing_eans)} missing")
+                
+                # Create missing products in mock data
+                for ean in missing_eans:
+                    self.mock_data["products"].append({
+                        "ean": ean,
+                        "functional_name": "",
+                        "created_at": datetime.now().isoformat()
+                    })
+                
+                print(f"DB Service: [DEV] Created {len(missing_eans)} missing products in mock data")
+                return
             
-            # Check which products already exist
+            # Production mode - check which products already exist
             print("DB Service: Checking existing products...")
             existing_result = self.supabase.table("products").select("ean").in_("ean", list(eans)).execute()
             existing_eans = {row["ean"] for row in existing_result.data} if existing_result.data else set()
@@ -402,7 +471,14 @@ class DatabaseService:
     async def debug_products_table(self):
         """Debug method to see what's in the products table"""
         try:
-            # Get first few products to see the structure
+            if self.dev_mode:
+                # Development mode - debug mock data
+                products = self.mock_data.get("products", [])
+                print(f"DEBUG: [DEV] Mock products count: {len(products)}")
+                print(f"DEBUG: [DEV] Sample products: {products[:5]}")
+                return
+                
+            # Production mode - debug Supabase
             result = self.supabase.table("products").select("*").limit(5).execute()
             print(f"DEBUG: Products table sample data: {result.data}")
             
@@ -619,10 +695,67 @@ class DatabaseService:
                 "transformation_type": transformation_type
             }
             
+            if self.dev_mode:
+                # Development mode - store in mock data (non-critical, just for logging)
+                if "transform_logs" not in self.mock_data:
+                    self.mock_data["transform_logs"] = []
+                self.mock_data["transform_logs"].append(data)
+                return
+                
+            # Production mode - use Supabase
             self.supabase.table("transform_logs").insert(data).execute()
         except Exception:
             # Log transformation failures are non-critical
             pass
+    
+    async def _ensure_user_record_exists(self, user_id: str):
+        """Ensure user record exists in public.users table by fetching from auth.users if needed"""
+        try:
+            self.logger.info(f"Ensuring user record exists for user_id: {user_id}")
+            
+            # First check if user already exists in public.users
+            try:
+                result = self.service_supabase.table("users").select("id").eq("id", user_id).execute()
+                if result.data and len(result.data) > 0:
+                    self.logger.info(f"User record already exists for user_id: {user_id}")
+                    return
+            except Exception as check_error:
+                self.logger.info(f"Could not check existing user (table might not exist yet): {check_error}")
+            
+            # User doesn't exist, need to get user info from auth and create record
+            self.logger.info(f"User record missing, fetching from Supabase Auth for user_id: {user_id}")
+            
+            # Get user info from Supabase Auth using service role
+            auth_response = self.service_supabase.auth.admin.get_user_by_id(user_id)
+            
+            if auth_response.user:
+                user_email = auth_response.user.email
+                self.logger.info(f"Retrieved user email from auth: {user_email}")
+                
+                # Create user record in public.users
+                user_data = {
+                    "id": user_id,
+                    "email": user_email,
+                    "created_at": datetime.utcnow().isoformat(),
+                    "updated_at": datetime.utcnow().isoformat()
+                }
+                
+                self.logger.info(f"Creating user record in public.users: {user_data}")
+                create_result = self.service_supabase.table("users").insert(user_data).execute()
+                
+                if create_result.data:
+                    self.logger.info(f"Successfully created user record for user_id: {user_id}")
+                else:
+                    self.logger.error(f"Failed to create user record - no data returned")
+            else:
+                self.logger.error(f"Could not retrieve user info from Supabase Auth for user_id: {user_id}")
+                raise DatabaseException(f"User {user_id} not found in authentication system")
+                
+        except Exception as e:
+            self.logger.error(f"Error ensuring user record exists for user_id {user_id}: {str(e)}")
+            # Don't raise the error - allow upload to proceed even if user creation fails
+            # The upload will likely fail anyway, but we'll get better error info
+            self.logger.warning(f"Continuing with upload despite user record creation failure")
     
     # ============ NEW V2.0 METHODS FOR EMAIL, AND DASHBOARD APIs ============
     

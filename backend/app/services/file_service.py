@@ -6,10 +6,10 @@ from app.utils.exceptions import FileProcessingException
 from typing import Optional
 
 class FileService:
-    def __init__(self):
+    def __init__(self, user_token: str = None):
         self.upload_dir = Path("uploads")
         self.upload_dir.mkdir(exist_ok=True)
-        self.db_service = DatabaseService()
+        self.db_service = DatabaseService(user_token=user_token)
     
     async def save_upload(self, upload_id: str, file: UploadFile, user_id: str) -> str:
         try:

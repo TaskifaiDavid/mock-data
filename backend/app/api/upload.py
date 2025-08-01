@@ -1,13 +1,13 @@
-from fastapi import APIRouter, UploadFile, File, Depends, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Depends, BackgroundTasks, Header
 from app.models.upload import UploadResponse, UploadStatus
 from app.api.auth import get_current_user
 from app.services.file_service import FileService
 from app.services.cleaning_service import CleaningService
-from app.utils.exceptions import ValidationException, FileProcessingException
+from app.utils.exceptions import ValidationException, FileProcessingException, DatabaseException
 from app.utils.config import get_settings
 import uuid
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
@@ -22,10 +22,25 @@ async def upload_file(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user),
+    authorization: Optional[str] = Header(None),
     file_service: FileService = Depends(get_file_service),
     cleaning_service: CleaningService = Depends(get_cleaning_service)
 ):
     settings = get_settings()
+    
+    # Extract token for database operations
+    user_token = None
+    if authorization and authorization.startswith("Bearer "):
+        user_token = authorization.split(" ")[1]
+    
+    # Create services with user token
+    file_service_with_token = FileService(user_token=user_token)
+    
+    # Debug: Log current_user contents
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Current user object: {current_user}")
+    logger.info(f"User ID being used: {current_user['id']}")
     
     # Validate file
     if not file.filename.endswith(tuple(settings.allowed_extensions)):
@@ -52,7 +67,12 @@ async def upload_file(
     )
     
     # Save file and create database record
-    await file_service.save_upload(upload_id, file, current_user["id"])
+    try:
+        await file_service_with_token.save_upload(upload_id, file, current_user["id"])
+    except DatabaseException as e:
+        raise ValidationException(f"Upload failed: {str(e)}")
+    except Exception as e:
+        raise FileProcessingException(f"Failed to save file: {str(e)}")
     
     # Process file in background
     background_tasks.add_task(
@@ -70,11 +90,21 @@ async def upload_multiple_files(
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     current_user: dict = Depends(get_current_user),
+    authorization: Optional[str] = Header(None),
     file_service: FileService = Depends(get_file_service),
     cleaning_service: CleaningService = Depends(get_cleaning_service)
 ):
     """Upload multiple files and process them in queue"""
     settings = get_settings()
+    
+    # Extract token for database operations
+    user_token = None
+    if authorization and authorization.startswith("Bearer "):
+        user_token = authorization.split(" ")[1]
+    
+    # Create services with user token
+    file_service_with_token = FileService(user_token=user_token)
+    
     upload_responses = []
     valid_files = []
     
@@ -129,7 +159,16 @@ async def upload_multiple_files(
         upload_responses.append(upload_response)
         
         # Save file and create database record
-        await file_service.save_upload(upload_id, file, current_user["id"])
+        try:
+            await file_service_with_token.save_upload(upload_id, file, current_user["id"])
+        except DatabaseException as e:
+            # Mark this upload as failed and continue with others
+            upload_response.status = UploadStatus.FAILED
+            continue
+        except Exception as e:
+            # Mark this upload as failed and continue with others
+            upload_response.status = UploadStatus.FAILED
+            continue
         
         # Add to processing queue (process files sequentially)
         background_tasks.add_task(
