@@ -1,0 +1,15 @@
+╭───────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Code!                         │
+│                                                   │
+│   /help for help, /status for your current setup  │
+│                                                   │
+│   cwd: /home/david/mockDataRepo/backend           │
+╰───────────────────────────────────────────────────╯
+  ⎿  Referenced file app/services/db_service.py
+  ⎿  Read app/services/auth_service.py (233 lines)
+  ⎿  Read fix_user_id.py (67 lines)
+  ⎿  Read venv/bin/activate (71 lines)
+  ⎿  Read simple_upload_test.py (71 lines)
+  ⎿  5-hour limit reached ∙ resets 6pm
+     /upgrade to increase your usage limit.
+

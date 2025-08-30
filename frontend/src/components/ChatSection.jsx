@@ -52,7 +52,7 @@ const ChatSection = () => {
       const aiMessage = { type: 'ai', content: data.answer, timestamp: new Date() }
       setMessages(prev => [...prev, aiMessage])
     } catch (error) {
-      console.error('Chat error:', error)
+      console.error('Chat request failed:', error.message)
       const errorMessage = { 
         type: 'ai', 
         content: `Error: ${error.message || 'Unable to process your question. Please try again.'}`,
@@ -178,134 +178,103 @@ const ChatSection = () => {
         .chat-section {
           display: flex;
           flex-direction: column;
-          height: calc(100vh - 120px + 10vh);
-          background: #f8f9fa;
-          border-radius: 8px;
+          height: calc(85vh - 102px + 8.5vh);
+          background: var(--surface-primary);
+          border-radius: var(--radius-lg);
           overflow: hidden;
-          width: 40%;
+          width: 80%;
           margin: 0 auto;
-        }
-
-        .chat-header {
-          background: linear-gradient(135deg, #007bff, #0056b3);
-          color: white;
-          padding: 20px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-
-        .header-content h2 {
-          margin: 0 0 5px 0;
-          font-size: 28px;
-        }
-
-        .header-content p {
-          margin: 0;
-          opacity: 0.9;
-          font-size: 18px;
-        }
-
-        .chat-actions .btn-secondary {
-          background: rgba(255,255,255,0.2);
-          border: 1px solid rgba(255,255,255,0.3);
-          color: white;
-          padding: 8px 16px;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 14px;
-        }
-
-        .chat-actions .btn-secondary:hover:not(:disabled) {
-          background: rgba(255,255,255,0.3);
-        }
-
-        .chat-actions .btn-secondary:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
+          border: 1px solid var(--border-light);
+          box-shadow: var(--shadow-md);
         }
 
         .chat-container {
           display: flex;
           flex-direction: column;
           flex: 1;
-          background: white;
+          background: var(--surface-primary);
         }
 
         .chat-messages {
           flex: 1;
           overflow-y: auto;
-          max-height: calc(100vh - 280px + 10vh);
-          padding: 20px;
-          background: #fafafa;
+          max-height: calc(85vh - 238px + 8.5vh);
+          padding: var(--spacing-lg);
+          background: var(--surface-secondary);
           scroll-behavior: smooth;
         }
 
         .welcome-section {
           text-align: center;
           max-width: 800px;
-          margin: 40px auto;
+          margin: var(--spacing-2xl) auto;
         }
 
         .welcome-message {
-          background: white;
-          padding: 30px;
-          border-radius: 12px;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-          margin-bottom: 30px;
+          background: var(--surface-primary);
+          padding: var(--spacing-2xl);
+          border-radius: var(--radius-lg);
+          box-shadow: var(--shadow-sm);
+          margin-bottom: var(--spacing-xl);
+          border: 1px solid var(--border-light);
         }
 
         .welcome-message h3 {
-          margin: 0 0 15px 0;
-          color: #333;
-          font-size: 28px;
+          margin: 0 0 var(--spacing-md) 0;
+          color: var(--text-primary);
+          font-size: 1.5rem;
+          font-weight: 600;
         }
 
         .welcome-message p {
           margin: 0;
-          color: #666;
-          font-size: 20px;
+          color: var(--text-secondary);
+          font-size: 1rem;
           line-height: 1.5;
         }
 
         .sample-questions {
-          background: white;
-          padding: 25px;
-          border-radius: 12px;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+          background: var(--surface-primary);
+          padding: var(--spacing-xl);
+          border-radius: var(--radius-lg);
+          box-shadow: var(--shadow-sm);
+          border: 1px solid var(--border-light);
         }
 
         .sample-questions h4 {
-          margin: 0 0 20px 0;
-          color: #333;
-          font-size: 22px;
+          margin: 0 0 var(--spacing-lg) 0;
+          color: var(--text-primary);
+          font-size: 1.125rem;
+          font-weight: 600;
         }
 
         .question-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-          gap: 12px;
+          grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+          gap: var(--spacing-sm);
         }
 
         .sample-question {
-          background: #f8f9fa;
-          border: 2px solid #e9ecef;
-          padding: 12px 16px;
-          border-radius: 8px;
+          background: var(--surface-secondary);
+          border: 1px solid var(--border-light);
+          padding: var(--spacing-sm) var(--spacing-md);
+          border-radius: var(--radius-md);
           cursor: pointer;
           text-align: left;
-          font-size: 18px;
+          font-size: 0.875rem;
           transition: all 0.2s ease;
+          color: var(--text-primary);
         }
 
         .sample-question:hover {
-          background: #e3f2fd;
-          border-color: #007bff;
+          background: var(--surface-primary);
+          border-color: var(--border-medium);
           transform: translateY(-1px);
+          box-shadow: var(--shadow-sm);
         }
 
         .message {
-          margin-bottom: 20px;
+          margin-bottom: var(--spacing-lg);
           max-width: 85%;
         }
 
@@ -321,9 +290,9 @@ const ChatSection = () => {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          margin-bottom: 8px;
-          font-size: 16px;
-          color: #666;
+          margin-bottom: var(--spacing-xs);
+          font-size: 0.75rem;
+          color: var(--text-muted);
         }
 
         .message-sender {
@@ -336,25 +305,25 @@ const ChatSection = () => {
 
         .message-content {
           position: relative;
-          padding: 16px 20px;
-          border-radius: 12px;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+          padding: var(--spacing-md) var(--spacing-lg);
+          border-radius: var(--radius-lg);
+          box-shadow: var(--shadow-sm);
           word-wrap: break-word;
           overflow-wrap: break-word;
           max-width: 100%;
         }
 
         .message.user .message-content {
-          background: #007bff;
-          color: white;
-          border-bottom-right-radius: 4px;
+          background: var(--notion-black);
+          color: var(--notion-white);
+          border-bottom-right-radius: var(--radius-sm);
         }
 
         .message.ai .message-content {
-          background: white;
-          color: #333;
-          border: 1px solid #e9ecef;
-          border-bottom-left-radius: 4px;
+          background: var(--surface-primary);
+          color: var(--text-primary);
+          border: 1px solid var(--border-light);
+          border-bottom-left-radius: var(--radius-sm);
         }
 
         .message-content pre {
@@ -363,7 +332,7 @@ const ChatSection = () => {
           word-wrap: break-word;
           overflow-wrap: break-word;
           font-family: inherit;
-          font-size: 18px;
+          font-size: 0.875rem;
           line-height: 1.5;
           max-width: 100%;
           overflow-x: auto;
@@ -371,27 +340,29 @@ const ChatSection = () => {
 
         .copy-btn {
           position: absolute;
-          top: 8px;
-          right: 8px;
-          background: #f8f9fa;
-          border: 1px solid #dee2e6;
-          border-radius: 4px;
-          padding: 4px 8px;
+          top: var(--spacing-xs);
+          right: var(--spacing-xs);
+          background: var(--surface-secondary);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-sm);
+          padding: 2px var(--spacing-xs);
           cursor: pointer;
-          font-size: 12px;
+          font-size: 0.6rem;
           opacity: 0.7;
           transition: opacity 0.2s ease;
+          color: var(--text-secondary);
         }
 
         .copy-btn:hover {
           opacity: 1;
+          background: var(--surface-primary);
         }
 
         .loading-animation {
           display: flex;
           align-items: center;
-          gap: 8px;
-          color: #666;
+          gap: var(--spacing-xs);
+          color: var(--text-muted);
         }
 
         .loading-dots {
@@ -412,68 +383,78 @@ const ChatSection = () => {
         }
 
         .chat-input-section {
-          background: white;
-          border-top: 1px solid #e9ecef;
-          padding: 20px;
+          background: var(--surface-primary);
+          border-top: 1px solid var(--border-light);
+          padding: var(--spacing-lg);
         }
 
         .input-container {
           display: flex;
-          gap: 12px;
+          gap: var(--spacing-sm);
           max-width: 1000px;
           margin: 0 auto;
         }
 
         .chat-input {
           flex: 1;
-          border: 2px solid #e9ecef;
-          border-radius: 8px;
-          padding: 12px 16px;
+          border: 1px solid var(--border-medium);
+          border-radius: var(--radius-md);
+          padding: var(--spacing-sm) var(--spacing-md);
           resize: none;
           font-family: inherit;
-          font-size: 18px;
+          font-size: 0.875rem;
           line-height: 1.4;
           transition: border-color 0.2s ease;
+          background: var(--surface-primary);
+          color: var(--text-primary);
         }
 
         .chat-input:focus {
           outline: none;
-          border-color: #007bff;
+          border-color: var(--border-focus);
+          box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.1);
         }
 
         .chat-input:disabled {
-          background: #f8f9fa;
+          background: var(--surface-secondary);
           cursor: not-allowed;
+          color: var(--text-muted);
         }
 
         .send-btn {
-          background: #007bff;
-          color: white;
+          background: var(--notion-black);
+          color: var(--notion-white);
           border: none;
-          border-radius: 8px;
-          padding: 12px 42px;
+          border-radius: var(--radius-md);
+          padding: var(--spacing-sm) var(--spacing-xl);
           cursor: pointer;
-          font-size: 18px;
-          font-weight: 600;
-          transition: background-color 0.2s ease;
+          font-size: 0.875rem;
+          font-weight: 500;
+          transition: all 0.2s ease;
           white-space: nowrap;
-          min-width: 140px;
+          min-width: 120px;
         }
 
         .send-btn:disabled {
-          background: #6c757d;
+          background: var(--neutral-400);
           cursor: not-allowed;
         }
 
         .send-btn:not(:disabled):hover {
-          background: #0056b3;
+          background: var(--neutral-800);
+          transform: translateY(-1px);
+          box-shadow: var(--shadow-sm);
+        }
+
+        @media (max-width: 1024px) {
+          .chat-section {
+            width: 90%;
+          }
         }
 
         @media (max-width: 768px) {
-          .chat-header {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 15px;
+          .chat-section {
+            width: 95%;
           }
 
           .question-grid {

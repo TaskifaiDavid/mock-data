@@ -26,6 +26,7 @@ class ProcessingStatus(BaseModel):
     rows_processed: Optional[int] = None
     rows_cleaned: Optional[int] = None
     processing_time_ms: Optional[int] = None
+    processing_logs: Optional[List[Dict[str, Any]]] = None
 
 class SelloutEntry(BaseModel):
     product_ean: Optional[str] = None

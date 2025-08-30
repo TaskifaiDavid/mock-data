@@ -25,7 +25,7 @@ const EmailReporting = () => {
       const response = await getEmailLogs()
       setEmailLogs(response.logs || [])
     } catch (err) {
-      console.error('Error fetching email logs:', err)
+      console.error('Failed to fetch email logs:', err.message)
       setError('Failed to load email logs')
     }
   }
@@ -50,7 +50,7 @@ const EmailReporting = () => {
         link.click()
       }
     } catch (err) {
-      console.error('Error generating report:', err)
+      console.error('Failed to generate report:', err.message)
       setError('Failed to generate report')
     } finally {
       setLoading(false)

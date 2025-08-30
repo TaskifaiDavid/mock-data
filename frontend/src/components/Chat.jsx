@@ -36,7 +36,8 @@ const Chat = () => {
       const aiMessage = { type: 'ai', content: data.answer }
       setMessages(prev => [...prev, aiMessage])
     } catch (error) {
-      console.error('Chat error:', error)
+      // Keep essential error logging for production debugging
+      console.error('Chat request failed:', error.message)
       const errorMessage = { 
         type: 'ai', 
         content: 'Sorry, I encountered an error processing your question. Please try again.' 

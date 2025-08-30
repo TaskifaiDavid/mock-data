@@ -13,20 +13,13 @@ function App() {
 
   const checkAuthStatus = async () => {
     try {
-      console.log('🔍 Checking authentication status...')
       const token = localStorage.getItem('access_token')
-      console.log('Auth check:', { 
-        hasToken: !!token,
-        tokenLength: token ? token.length : 0 
-      })
       
       if (!token) {
-        console.log('❌ No token found, user not authenticated')
         setLoading(false)
         return
       }
 
-      console.log('🔗 Validating token with backend...')
       // Validate token with backend
       const response = await fetch('http://localhost:8000/api/auth/debug-token', {
         headers: {
@@ -39,31 +32,24 @@ function App() {
       }
 
       const debugInfo = await response.json()
-      console.log('✅ Auth debug response:', debugInfo)
 
       if (debugInfo.user_found) {
-        console.log('✅ User authenticated successfully')
         setIsAuthenticated(true)
         setUser({
           email: debugInfo.user_email,
           id: debugInfo.user_id
         })
       } else {
-        console.log('❌ Token invalid, clearing authentication')
         // Invalid token, clear it
         localStorage.removeItem('access_token')
         setIsAuthenticated(false)
       }
     } catch (error) {
-      console.error('❌ Auth check failed:', error)
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack
-      })
+      // Keep essential error logging for production debugging
+      console.error('Authentication check failed:', error.message)
       localStorage.removeItem('access_token')
       setIsAuthenticated(false)
     } finally {
-      console.log('✅ Auth check completed')
       setLoading(false)
     }
   }
@@ -79,14 +65,8 @@ function App() {
   }, [])
 
   if (loading) {
-    console.log('🔄 App loading...')
     return <div className="loading">Loading...</div>
   }
-
-  console.log('🎯 App render:', { 
-    isAuthenticated, 
-    user: user?.email || 'none' 
-  })
 
   return (
     <div className="app">
@@ -94,7 +74,6 @@ function App() {
         <Login onLoginSuccess={checkAuthStatus} />
       ) : (
         <Dashboard user={user} onLogout={() => {
-          console.log('🚪 Logging out...')
           localStorage.removeItem('access_token')
           setIsAuthenticated(false)
           setUser(null)

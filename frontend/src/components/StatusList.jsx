@@ -9,29 +9,41 @@ function StatusList() {
   useEffect(() => {
     fetchUploads()
     
-    // Poll for updates every 30 seconds
-    const interval = setInterval(fetchUploads, 30000)
+    // Poll for updates every 10 seconds for better real-time updates
+    const interval = setInterval(fetchUploads, 10000)
     
     return () => clearInterval(interval)
   }, [])
 
+  // Add refresh function that can be called externally
+  useEffect(() => {
+    // Listen for upload completion events
+    const handleUploadComplete = () => {
+      fetchUploads()
+    }
+
+    window.addEventListener('uploadComplete', handleUploadComplete)
+    
+    return () => {
+      window.removeEventListener('uploadComplete', handleUploadComplete)
+    }
+  }, [])
+
   const fetchUploads = async () => {
     try {
-      console.log('📥 Fetching user uploads...')
       const token = localStorage.getItem('access_token')
       
       if (!token) {
-        console.log('❌ No token found')
         setLoading(false)
         return
       }
 
       const uploadsData = await api.getUserUploads()
-      console.log('✅ Uploads fetched:', uploadsData)
       setUploads(uploadsData || [])
       setError(null)
     } catch (error) {
-      console.error('❌ Error fetching uploads:', error)
+      // Keep essential error logging for production debugging
+      console.error('Failed to fetch uploads:', error.message)
       setError(error.message)
     } finally {
       setLoading(false)

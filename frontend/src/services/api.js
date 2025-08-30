@@ -4,18 +4,6 @@ class ApiService {
   async request(endpoint, options = {}) {
     const token = localStorage.getItem('access_token')
     
-    const requestInfo = {
-      endpoint,
-      method: options.method || 'GET',
-      hasToken: !!token,
-      tokenLength: token ? token.length : 0,
-      tokenPreview: token ? `***...${token.slice(-4)}` : 'none',
-      url: `${API_URL}${endpoint}`,
-      timestamp: new Date().toISOString()
-    }
-    
-    console.log('🚀 API Request:', requestInfo)
-    
     const config = {
       ...options,
       headers: {
@@ -27,33 +15,15 @@ class ApiService {
     let response
     try {
       response = await fetch(`${API_URL}${endpoint}`, config)
-      console.log('📡 API Response received:', {
-        endpoint,
-        status: response.status,
-        statusText: response.statusText,
-        ok: response.ok,
-        url: response.url
-      })
     } catch (fetchError) {
-      console.error('🔥 Network/Fetch Error:', {
-        endpoint,
-        error: fetchError.message,
-        type: fetchError.name,
-        stack: fetchError.stack
-      })
+      // Keep essential network error logging
+      console.error('Network error:', fetchError.message)
       throw new Error(`Network error: ${fetchError.message}`)
     }
     
     if (!response.ok) {
-      console.error('API Error:', {
-        status: response.status,
-        statusText: response.statusText,
-        endpoint
-      })
-      
       // Handle authentication errors specifically
       if (response.status === 401) {
-        console.warn('Authentication failed - clearing token')
         localStorage.removeItem('access_token')
         // Redirect to login or trigger auth refresh
         if (window.location.pathname !== '/login') {
@@ -63,9 +33,29 @@ class ApiService {
       
       try {
         const error = await response.json()
-        throw new Error(error.error || `Request failed with status ${response.status}`)
+        // Enhanced error message handling
+        let errorMessage = error.error || error.detail || `Request failed with status ${response.status}`
+        
+        // Handle validation errors from Pydantic
+        if (error.detail && Array.isArray(error.detail)) {
+          errorMessage = error.detail.map(err => err.msg || err.message).join(', ')
+        }
+        
+        throw new Error(errorMessage)
       } catch (parseError) {
-        throw new Error(`Request failed with status ${response.status}`)
+        // Handle cases where response is not JSON
+        const statusMessages = {
+          400: 'Bad request. Please check your input.',
+          403: 'You do not have permission to perform this action.',
+          404: 'The requested resource was not found.',
+          409: 'A conflict occurred. The resource may already exist.',
+          422: 'Validation error. Please check your input.',
+          500: 'Internal server error. Please try again later.',
+          503: 'Service temporarily unavailable. Please try again later.'
+        }
+        
+        const message = statusMessages[response.status] || `Request failed with status ${response.status}`
+        throw new Error(message)
       }
     }
 
@@ -74,11 +64,6 @@ class ApiService {
 
   async uploadFile(file) {
     const token = localStorage.getItem('access_token')
-    console.log('Upload File:', {
-      fileName: file.name,
-      hasToken: !!token,
-      tokenLength: token ? token.length : 0
-    })
     
     const formData = new FormData()
     formData.append('file', file)
@@ -92,13 +77,7 @@ class ApiService {
     })
 
     if (!response.ok) {
-      console.error('Upload Error:', {
-        status: response.status,
-        statusText: response.statusText
-      })
-      
       if (response.status === 401) {
-        console.warn('Upload authentication failed - clearing token')
         localStorage.removeItem('access_token')
         if (window.location.pathname !== '/login') {
           window.location.href = '/login'
@@ -118,11 +97,6 @@ class ApiService {
 
   async uploadMultipleFiles(files) {
     const token = localStorage.getItem('access_token')
-    console.log('Upload Multiple Files:', {
-      fileCount: files.length,
-      fileNames: files.map(f => f.name),
-      hasToken: !!token
-    })
     
     const formData = new FormData()
     files.forEach(file => {
@@ -138,13 +112,7 @@ class ApiService {
     })
 
     if (!response.ok) {
-      console.error('Multiple Upload Error:', {
-        status: response.status,
-        statusText: response.statusText
-      })
-      
       if (response.status === 401) {
-        console.warn('Upload authentication failed - clearing token')
         localStorage.removeItem('access_token')
         if (window.location.pathname !== '/login') {
           window.location.href = '/login'

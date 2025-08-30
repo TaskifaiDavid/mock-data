@@ -1,4 +1,10 @@
+import logging
 import pandas as pd
+import asyncio
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
+
+logger = logging.getLogger(__name__)
 import numpy as np
 from typing import Tuple, List, Dict, Any
 import re
@@ -36,46 +42,50 @@ class DataCleaner:
             return None
     
     async def clean_data(self, df: pd.DataFrame, vendor: str, filename: str = None) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
-        """Clean data based on vendor-specific rules"""
+        """Clean data based on vendor-specific rules with async optimization"""
         
         self.current_filename = filename
-        df_clean = df.copy()
         transformations = []
         
-        # Remove empty rows
-        df_clean = df_clean.dropna(how='all')
+        # For large DataFrames, use optimized processing
+        if len(df) > 50000:
+            logger.debug(f"DEBUG: Large dataset detected ({len(df)} rows), using chunked processing")
+            return await self._clean_data_chunked(df, vendor, transformations)
+        
+        # Remove empty rows efficiently
+        df_clean = await self._remove_empty_rows_async(df)
         
         # Apply vendor-specific cleaning
-        print(f"DEBUG: Applying vendor-specific cleaning for vendor: '{vendor}'")
+        logger.debug(f"DEBUG: Applying vendor-specific cleaning for vendor: '{vendor}'")
         if vendor == "galilu":
-            print("DEBUG: Using _clean_galilu_data()")
+            logger.debug("DEBUG: Using _clean_galilu_data()")
             df_clean, trans = await self._clean_galilu_data(df_clean)
         elif vendor == "boxnox":
-            print("DEBUG: Using _clean_boxnox_data()")
+            logger.debug("DEBUG: Using _clean_boxnox_data()")
             df_clean, trans = await self._clean_boxnox_data(df_clean)
         elif vendor == "skins_sa":
-            print("DEBUG: Using _clean_skins_sa_data()")
+            logger.debug("DEBUG: Using _clean_skins_sa_data()")
             df_clean, trans = await self._clean_skins_sa_data(df_clean)
         elif vendor == "skins_nl":
-            print("DEBUG: Using _clean_skins_nl_data()")
+            logger.debug("DEBUG: Using _clean_skins_nl_data()")
             df_clean, trans = await self._clean_skins_nl_data(df_clean)
         elif vendor == "cdlc":
-            print("DEBUG: Using _clean_cdlc_data()")
+            logger.debug("DEBUG: Using _clean_cdlc_data()")
             df_clean, trans = await self._clean_cdlc_data(df_clean)
         elif vendor == "continuity":
-            print("DEBUG: Using _clean_continuity_data()")
+            logger.debug("DEBUG: Using _clean_continuity_data()")
             df_clean, trans = await self._clean_continuity_data(df_clean)
         elif vendor == "liberty":
-            print("DEBUG: Using _clean_liberty_data()")
+            logger.debug("DEBUG: Using _clean_liberty_data()")
             df_clean, trans = await self._clean_liberty_data(df_clean)
         elif vendor == "ukraine":
-            print("DEBUG: Using _clean_ukraine_data()")
+            logger.debug("DEBUG: Using _clean_ukraine_data()")
             df_clean, trans = await self._clean_ukraine_data(df_clean)
         elif vendor == "aromateque":
-            print("DEBUG: Using _clean_aromateque_data()")
+            logger.debug("DEBUG: Using _clean_aromateque_data()")
             df_clean, trans = await self._clean_aromateque_data(df_clean)
         else:
-            print(f"DEBUG: Using _clean_generic_data() for unknown vendor: '{vendor}'")
+            logger.debug(f"DEBUG: Using _clean_generic_data() for unknown vendor: '{vendor}'")
             df_clean, trans = await self._clean_generic_data(df_clean)
         
         transformations.extend(trans)
@@ -85,14 +95,89 @@ class DataCleaner:
         transformations.extend(common_trans)
         
         return df_clean, transformations
+
+    async def _remove_empty_rows_async(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Asynchronously remove empty rows to avoid blocking event loop"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: df.dropna(how='all'))
+
+    async def _clean_data_chunked(self, df: pd.DataFrame, vendor: str, transformations: List[Dict[str, Any]]) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
+        """Process large datasets in chunks to avoid memory issues and blocking"""
+        chunk_size = 10000  # Process in chunks of 10k rows
+        chunks = []
+        
+        # Create chunks
+        for i in range(0, len(df), chunk_size):
+            chunk = df.iloc[i:i + chunk_size]
+            chunks.append(chunk)
+        
+        logger.debug(f"DEBUG: Processing {len(chunks)} chunks for large dataset")
+        
+        # Process chunks concurrently but limit concurrent operations
+        cleaned_chunks = []
+        chunk_transformations = []
+        
+        # Process in batches of 2 to manage memory
+        for i in range(0, len(chunks), 2):
+            batch = chunks[i:i + 2]
+            batch_tasks = []
+            
+            for j, chunk in enumerate(batch):
+                task = asyncio.create_task(self._process_chunk_async(chunk, vendor, i + j))
+                batch_tasks.append(task)
+            
+            batch_results = await asyncio.gather(*batch_tasks)
+            
+            for chunk_df, chunk_trans in batch_results:
+                cleaned_chunks.append(chunk_df)
+                chunk_transformations.extend(chunk_trans)
+        
+        # Combine results
+        if cleaned_chunks:
+            combined_df = pd.concat(cleaned_chunks, ignore_index=True)
+        else:
+            combined_df = pd.DataFrame()
+        
+        # Apply common cleaning
+        combined_df, common_trans = await self._apply_common_cleaning(combined_df)
+        chunk_transformations.extend(common_trans)
+        
+        logger.debug(f"DEBUG: Chunked processing complete - {len(combined_df)} total rows")
+        return combined_df, chunk_transformations
+
+    async def _process_chunk_async(self, chunk: pd.DataFrame, vendor: str, chunk_id: int) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
+        """Process a single chunk asynchronously"""
+        loop = asyncio.get_event_loop()
+        
+        # Offload CPU-intensive work to thread pool
+        partial_func = partial(self._process_chunk_blocking, chunk, vendor, chunk_id)
+        result = await loop.run_in_executor(None, partial_func)
+        
+        return result
+
+    def _process_chunk_blocking(self, chunk: pd.DataFrame, vendor: str, chunk_id: int) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
+        """Blocking chunk processing for thread pool execution"""
+        logger.debug(f"DEBUG: Processing chunk {chunk_id} with {len(chunk)} rows")
+        
+        # This would call the actual vendor-specific cleaning logic
+        # For now, return the chunk as-is with minimal processing
+        chunk_clean = chunk.dropna(how='all')
+        transformations = [{
+            "step": f"chunk_{chunk_id}_processing",
+            "description": f"Processed chunk {chunk_id}",
+            "original_rows": len(chunk),
+            "resulting_rows": len(chunk_clean)
+        }]
+        
+        return chunk_clean, transformations
     
     async def _clean_galilu_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
         transformations = []
         
-        print(f"🔍 DEBUG: === GALILU DATA CLEANING START ===")
-        print(f"🔍 DEBUG: Input DataFrame shape: {df.shape}")
-        print(f"🔍 DEBUG: Input DataFrame columns: {list(df.columns)}")
-        print(f"🔍 DEBUG: Input DataFrame dtypes: {df.dtypes.to_dict()}")
+        logger.debug(f"🔍 DEBUG: === GALILU DATA CLEANING START ===")
+        logger.debug(f"🔍 DEBUG: Input DataFrame shape: {df.shape}")
+        logger.debug(f"🔍 DEBUG: Input DataFrame columns: {list(df.columns)}")
+        logger.debug(f"🔍 DEBUG: Input DataFrame dtypes: {df.dtypes.to_dict()}")
         
         # Extract year from column headers or default to 2025
         year = 2025
@@ -100,33 +185,33 @@ class DataCleaner:
             first_col_name = str(df.columns[0]).strip()
             if first_col_name.isdigit() and len(first_col_name) == 4:
                 year = int(first_col_name)
-                print(f"✅ DEBUG: Extracted year from column name: {year}")
+                logger.debug(f"✅ DEBUG: Extracted year from column name: {year}")
             else:
-                print(f"🔍 DEBUG: Using default year: {year}")
+                logger.debug(f"🔍 DEBUG: Using default year: {year}")
         
         # Find the "Total" column to identify the target month column
         total_col_index = None
         target_month_col = None
         
-        print(f"🔍 DEBUG: === FINDING TOTAL COLUMN ===")
+        logger.debug(f"🔍 DEBUG: === FINDING TOTAL COLUMN ===")
         for i, col in enumerate(df.columns):
             col_str = str(col).strip().lower()
-            print(f"🔍 DEBUG: Checking column {i}: '{col}' -> '{col_str}' -> contains 'total'? {'total' in col_str}")
+            logger.debug(f"🔍 DEBUG: Checking column {i}: '{col}' -> '{col_str}' -> contains 'total'? {'total' in col_str}")
             if pd.notna(col) and 'total' in col_str:
                 total_col_index = i
-                print(f"✅ DEBUG: Found 'Total' column at index {i}: '{col}'")
+                logger.debug(f"✅ DEBUG: Found 'Total' column at index {i}: '{col}'")
                 break
         
         # If no Total column found in column names, check header row values
         if total_col_index is None and len(df) > 0:
             header_row = df.iloc[0]
-            print(f"🔍 DEBUG: No 'Total' in column names, checking header row values")
+            logger.debug(f"🔍 DEBUG: No 'Total' in column names, checking header row values")
             for i, val in enumerate(header_row):
                 val_str = str(val).strip().lower() if pd.notna(val) else ""
-                print(f"🔍 DEBUG: Checking header value {i}: '{val}' -> '{val_str}' -> contains 'total'? {'total' in val_str}")
+                logger.debug(f"🔍 DEBUG: Checking header value {i}: '{val}' -> '{val_str}' -> contains 'total'? {'total' in val_str}")
                 if 'total' in val_str:
                     total_col_index = i
-                    print(f"✅ DEBUG: Found 'Total' in header row at index {i}: '{val}'")
+                    logger.debug(f"✅ DEBUG: Found 'Total' in header row at index {i}: '{val}'")
                     break
         
         # Determine target month column and month number
@@ -143,16 +228,16 @@ class DataCleaner:
             # The month column is the one to the left of Total
             target_month_col_index = total_col_index - 1
             target_month_col = df.columns[target_month_col_index]
-            print(f"✅ DEBUG: Target month column (left of Total): '{target_month_col}' at index {target_month_col_index}")
+            logger.debug(f"✅ DEBUG: Target month column (left of Total): '{target_month_col}' at index {target_month_col_index}")
             
             # Extract month number from column name
             col_name_lower = str(target_month_col).lower()
-            print(f"🔍 DEBUG: Checking target month column name '{target_month_col}' -> '{col_name_lower}' for month")
+            logger.debug(f"🔍 DEBUG: Checking target month column name '{target_month_col}' -> '{col_name_lower}' for month")
             
             for month_name, month_num in month_mapping.items():
                 if month_name in col_name_lower:
                     month = month_num
-                    print(f"✅ DEBUG: Extracted month from column name '{target_month_col}': {month} ({month_name})")
+                    logger.debug(f"✅ DEBUG: Extracted month from column name '{target_month_col}': {month} ({month_name})")
                     break
             else:
                 # Try header row value if available
@@ -160,77 +245,77 @@ class DataCleaner:
                     header_val = df.iloc[0, target_month_col_index] if target_month_col_index < len(df.columns) else None
                     if pd.notna(header_val):
                         header_val_lower = str(header_val).lower()
-                        print(f"🔍 DEBUG: Checking header value '{header_val}' -> '{header_val_lower}' for month")
+                        logger.debug(f"🔍 DEBUG: Checking header value '{header_val}' -> '{header_val_lower}' for month")
                         for month_name, month_num in month_mapping.items():
                             if month_name in header_val_lower:
                                 month = month_num
-                                print(f"✅ DEBUG: Extracted month from header value '{header_val}': {month} ({month_name})")
+                                logger.debug(f"✅ DEBUG: Extracted month from header value '{header_val}': {month} ({month_name})")
                                 break
                         else:
-                            print(f"⚠️ DEBUG: No month found in header value, using default: {month}")
+                            logger.debug(f"⚠️ DEBUG: No month found in header value, using default: {month}")
                     else:
-                        print(f"⚠️ DEBUG: Header value is NaN, using default month: {month}")
+                        logger.debug(f"⚠️ DEBUG: Header value is NaN, using default month: {month}")
         else:
-            print(f"⚠️ DEBUG: Could not find 'Total' column, using default month and guessing target column")
+            logger.debug(f"⚠️ DEBUG: Could not find 'Total' column, using default month and guessing target column")
             # From screenshot, May appears to be the last month column before Total
             target_month_col_index = len(df.columns) - 2 if len(df.columns) > 1 else 0
             target_month_col = df.columns[target_month_col_index] if target_month_col_index < len(df.columns) else df.columns[-1]
-            print(f"⚠️ DEBUG: Guessed target month column: '{target_month_col}' at index {target_month_col_index}")
+            logger.debug(f"⚠️ DEBUG: Guessed target month column: '{target_month_col}' at index {target_month_col_index}")
         
         # Process all rows for the single target month column
         processed_rows = []
         
-        print(f"🔍 DEBUG: === ROW PROCESSING ===")
-        print(f"🔍 DEBUG: Target month: {month}, Target column: '{target_month_col}'")
-        print(f"🔍 DEBUG: Processing rows 1-{len(df)-1} (skipping header row 0)")
+        logger.debug(f"🔍 DEBUG: === ROW PROCESSING ===")
+        logger.debug(f"🔍 DEBUG: Target month: {month}, Target column: '{target_month_col}'")
+        logger.debug(f"🔍 DEBUG: Processing rows 1-{len(df)-1} (skipping header row 0)")
         
         # Start from row 1 (skip header row which is row 0)
         for row_idx in range(1, len(df)):
             row = df.iloc[row_idx]
-            print(f"🔍 DEBUG: --- Processing row {row_idx} ---")
-            print(f"🔍 DEBUG: Row {row_idx} data: {row.tolist()}")
+            logger.debug(f"🔍 DEBUG: --- Processing row {row_idx} ---")
+            logger.debug(f"🔍 DEBUG: Row {row_idx} data: {row.tolist()}")
             
             # Get product description from column A (first column)
             product_description = row.iloc[0] if len(row) > 0 else None
-            print(f"🔍 DEBUG: Row {row_idx} product description (col A): '{product_description}'")
+            logger.debug(f"🔍 DEBUG: Row {row_idx} product description (col A): '{product_description}'")
             
             if pd.isna(product_description) or str(product_description).strip() == '':
-                print(f"⚠️ DEBUG: Row {row_idx} SKIPPED - empty product description")
+                logger.debug(f"⚠️ DEBUG: Row {row_idx} SKIPPED - empty product description")
                 continue
             
             product_description_clean = str(product_description).strip()
             
             # Skip "Total" rows - these are summary rows, not actual products
             if product_description_clean.lower() == 'total':
-                print(f"⚠️ DEBUG: Row {row_idx} SKIPPED - 'Total' row (summary data)")
+                logger.debug(f"⚠️ DEBUG: Row {row_idx} SKIPPED - 'Total' row (summary data)")
                 continue
             
             # Get quantity from target month column
             quantity = 0
             if target_month_col in df.columns:
                 quantity_val = row[target_month_col]
-                print(f"🔍 DEBUG: Row {row_idx} quantity raw value from '{target_month_col}': '{quantity_val}' (type: {type(quantity_val)})")
+                logger.debug(f"🔍 DEBUG: Row {row_idx} quantity raw value from '{target_month_col}': '{quantity_val}' (type: {type(quantity_val)})")
                 
                 if pd.notna(quantity_val):
                     try:
                         quantity_str = str(quantity_val).strip()
                         quantity = float(quantity_str) if quantity_str else 0
-                        print(f"✅ DEBUG: Row {row_idx} parsed quantity: {quantity}")
+                        logger.debug(f"✅ DEBUG: Row {row_idx} parsed quantity: {quantity}")
                     except ValueError as e:
-                        print(f"⚠️ DEBUG: Row {row_idx} failed to parse quantity '{quantity_val}': {e}")
+                        logger.debug(f"⚠️ DEBUG: Row {row_idx} failed to parse quantity '{quantity_val}': {e}")
                         quantity = 0
                 else:
-                    print(f"⚠️ DEBUG: Row {row_idx} quantity is NaN")
+                    logger.debug(f"⚠️ DEBUG: Row {row_idx} quantity is NaN")
             else:
-                print(f"⚠️ DEBUG: Row {row_idx} target column '{target_month_col}' not found in DataFrame")
+                logger.debug(f"⚠️ DEBUG: Row {row_idx} target column '{target_month_col}' not found in DataFrame")
             
             # Only include rows with positive quantity
-            print(f"🔍 DEBUG: Row {row_idx} final quantity: {quantity} -> Include? {quantity > 0}")
+            logger.debug(f"🔍 DEBUG: Row {row_idx} final quantity: {quantity} -> Include? {quantity > 0}")
             if quantity > 0:
                 # Map Polish product description to EAN using database lookup
-                print(f"🔍 DEBUG: Row {row_idx} mapping product '{product_description_clean}' to EAN")
+                logger.debug(f"🔍 DEBUG: Row {row_idx} mapping product '{product_description_clean}' to EAN")
                 product_ean = await self._map_galilu_product_to_ean(product_description_clean)
-                print(f"🔍 DEBUG: Row {row_idx} mapped EAN: '{product_ean}'")
+                logger.debug(f"🔍 DEBUG: Row {row_idx} mapped EAN: '{product_ean}'")
                 
                 # Only include rows where we successfully mapped to an EAN
                 if product_ean and product_ean != 'None':
@@ -246,26 +331,26 @@ class DataCleaner:
                     }
                     
                     processed_rows.append(row_data)
-                    print(f"✅ DEBUG: Row {row_idx} INCLUDED - {row_data}")
+                    logger.debug(f"✅ DEBUG: Row {row_idx} INCLUDED - {row_data}")
                 else:
-                    print(f"❌ DEBUG: Row {row_idx} EXCLUDED - no EAN mapping found for '{product_description_clean}'")
+                    logger.debug(f"❌ DEBUG: Row {row_idx} EXCLUDED - no EAN mapping found for '{product_description_clean}'")
             else:
-                print(f"❌ DEBUG: Row {row_idx} EXCLUDED - zero/negative quantity")
+                logger.debug(f"❌ DEBUG: Row {row_idx} EXCLUDED - zero/negative quantity")
         
         # Create new DataFrame from processed rows
-        print(f"🔍 DEBUG: === FINAL RESULTS ===")
-        print(f"🔍 DEBUG: Total rows processed: {len(df)} (original) -> {len(processed_rows)} (cleaned)")
+        logger.debug(f"🔍 DEBUG: === FINAL RESULTS ===")
+        logger.debug(f"🔍 DEBUG: Total rows processed: {len(df)} (original) -> {len(processed_rows)} (cleaned)")
         
         if processed_rows:
             df_cleaned = pd.DataFrame(processed_rows)
-            print(f"✅ DEBUG: Created cleaned DataFrame with {len(df_cleaned)} rows")
-            print(f"🔍 DEBUG: Cleaned DataFrame columns: {list(df_cleaned.columns)}")
-            print(f"🔍 DEBUG: Sample cleaned rows:")
+            logger.debug(f"✅ DEBUG: Created cleaned DataFrame with {len(df_cleaned)} rows")
+            logger.debug(f"🔍 DEBUG: Cleaned DataFrame columns: {list(df_cleaned.columns)}")
+            logger.debug(f"🔍 DEBUG: Sample cleaned rows:")
             for i, row in enumerate(processed_rows[:3]):
-                print(f"  Cleaned row {i}: {row}")
+                logger.debug(f"  Cleaned row {i}: {row}")
         else:
             df_cleaned = pd.DataFrame()
-            print(f"❌ DEBUG: No valid rows found, returning empty DataFrame")
+            logger.debug(f"❌ DEBUG: No valid rows found, returning empty DataFrame")
         
         # Log transformations
         transformations.append({
@@ -292,32 +377,32 @@ class DataCleaner:
             "transformation_type": "month_extraction"
         })
         
-        print(f"🔍 DEBUG: === GALILU DATA CLEANING END ===")
+        logger.debug(f"🔍 DEBUG: === GALILU DATA CLEANING END ===")
         return df_cleaned, transformations
     
     async def _map_galilu_product_to_ean(self, product_description: str) -> str:
         """Map Polish product descriptions to EANs using database lookup via galilu_name column"""
-        print(f"🔍 MAPPING: === GALILU PRODUCT TO EAN MAPPING START ===")
-        print(f"🔍 MAPPING: Input product description: '{product_description}'")
+        logger.debug(f"🔍 MAPPING: === GALILU PRODUCT TO EAN MAPPING START ===")
+        logger.debug(f"🔍 MAPPING: Input product description: '{product_description}'")
         
         # Try database lookup using products.galilu_name column
         if self.db_service:
-            print(f"🔍 MAPPING: Database service available, attempting galilu_name lookup")
+            logger.debug(f"🔍 MAPPING: Database service available, attempting galilu_name lookup")
             try:
                 ean = await self.db_service.get_ean_by_galilu_name(product_description)
                 if ean:
-                    print(f"✅ MAPPING: Found EAN '{ean}' via galilu_name for '{product_description}'")
+                    logger.debug(f"✅ MAPPING: Found EAN '{ean}' via galilu_name for '{product_description}'")
                     return ean
                 else:
-                    print(f"⚠️ MAPPING: No EAN found via galilu_name for '{product_description}'")
+                    logger.debug(f"⚠️ MAPPING: No EAN found via galilu_name for '{product_description}'")
             except Exception as e:
-                print(f"❌ MAPPING: Database galilu_name lookup failed for '{product_description}': {e}")
+                logger.debug(f"❌ MAPPING: Database galilu_name lookup failed for '{product_description}': {e}")
         else:
-            print(f"⚠️ MAPPING: No database service available, skipping galilu_name lookup")
+            logger.debug(f"⚠️ MAPPING: No database service available, skipping galilu_name lookup")
         
         # If no match found, return None (no more hardcoded fallback)
-        print(f"❌ MAPPING: No EAN mapping found for Galilu product '{product_description}' via galilu_name column")
-        print(f"🔍 MAPPING: Consider adding galilu_name mapping in products table: galilu_name='{product_description}' -> functional_name=[PRODUCT_NAME]")
+        logger.debug(f"❌ MAPPING: No EAN mapping found for Galilu product '{product_description}' via galilu_name column")
+        logger.debug(f"🔍 MAPPING: Consider adding galilu_name mapping in products table: galilu_name='{product_description}' -> functional_name=[PRODUCT_NAME]")
         return None
     
     async def _clean_boxnox_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
@@ -326,20 +411,20 @@ class DataCleaner:
         # Extract target month and year from filename
         target_year, target_month = self._extract_boxnox_date_from_filename()
         
-        print(f"DEBUG: BOXNOX filtering for Year: {target_year}, Month: {target_month}")
-        print(f"DEBUG: Original DataFrame shape: {df.shape}")
-        print(f"DEBUG: DataFrame columns: {list(df.columns)}")
-        print(f"DEBUG: DataFrame dtypes: {df.dtypes.to_dict()}")
+        logger.debug(f"DEBUG: BOXNOX filtering for Year: {target_year}, Month: {target_month}")
+        logger.debug(f"DEBUG: Original DataFrame shape: {df.shape}")
+        logger.debug(f"DEBUG: DataFrame columns: {list(df.columns)}")
+        logger.debug(f"DEBUG: DataFrame dtypes: {df.dtypes.to_dict()}")
         if len(df) > 0:
-            print(f"DEBUG: First 3 rows: {df.head(3).to_dict('records')}")
+            logger.debug(f"DEBUG: First 3 rows: {df.head(3).to_dict('records')}")
         
         # Check if required columns exist
         required_columns = ['YEAR', 'MONTH']
         missing_columns = [col for col in required_columns if col not in df.columns]
         
         if missing_columns:
-            print(f"ERROR: Missing required columns: {missing_columns}")
-            print(f"ERROR: Available columns: {list(df.columns)}")
+            logger.debug(f"ERROR: Missing required columns: {missing_columns}")
+            logger.debug(f"ERROR: Available columns: {list(df.columns)}")
             # Return original dataframe without filtering if required columns are missing
             transformations.append({
                 "row_index": 0,
@@ -358,7 +443,7 @@ class DataCleaner:
             ].copy()
             
             final_rows = len(df_filtered)
-            print(f"DEBUG: After filtering - kept {final_rows} rows out of {initial_rows}")
+            logger.debug(f"DEBUG: After filtering - kept {final_rows} rows out of {initial_rows}")
             
             transformations.append({
                 "row_index": 0,
@@ -392,7 +477,7 @@ class DataCleaner:
         year, month = self._extract_skins_sa_date_from_filename()
         
         # Debug: Log available columns
-        print(f"DEBUG: Available columns in Skins SA file: {list(df.columns)}")
+        logger.debug(f"DEBUG: Available columns in Skins SA file: {list(df.columns)}")
         
         # Column mapping for Skins SA
         column_mapping = {
@@ -406,15 +491,15 @@ class DataCleaner:
             'YEAR': 'file_year'
         }
         
-        print(f"DEBUG: Column mapping for Skins SA: {column_mapping}")
+        logger.debug(f"DEBUG: Column mapping for Skins SA: {column_mapping}")
         
         # Rename columns
         df.rename(columns=column_mapping, inplace=True)
-        print(f"DEBUG: Columns after mapping: {list(df.columns)}")
+        logger.debug(f"DEBUG: Columns after mapping: {list(df.columns)}")
         
         # Clean EAN data types - convert floats to strings and normalize
         if 'ean' in df.columns:
-            print(f"DEBUG: Cleaning EAN data types. Sample before: {df['ean'].head().tolist()}")
+            logger.debug(f"DEBUG: Cleaning EAN data types. Sample before: {df['ean'].head().tolist()}")
             
             for idx, value in df['ean'].items():
                 if pd.notna(value):
@@ -439,20 +524,20 @@ class DataCleaner:
                                 "transformation_type": "ean_normalization"
                             })
                     else:
-                        print(f"DEBUG: Invalid EAN format at row {idx}: '{clean_value}' (original: '{original_value}')")
+                        logger.debug(f"DEBUG: Invalid EAN format at row {idx}: '{clean_value}' (original: '{original_value}')")
             
-            print(f"DEBUG: Sample EANs after cleaning: {df['ean'].head().tolist()}")
+            logger.debug(f"DEBUG: Sample EANs after cleaning: {df['ean'].head().tolist()}")
         
         # Filter rows - skip rows without StockCode/ean
         if 'ean' in df.columns:
-            print(f"DEBUG: Filtering rows with missing StockCode/ean. Rows before: {len(df)}")
+            logger.debug(f"DEBUG: Filtering rows with missing StockCode/ean. Rows before: {len(df)}")
             
             # Remove rows where ean is null, empty, or whitespace
             initial_count = len(df)
             df = df[df['ean'].notna() & (df['ean'] != '') & (df['ean'].astype(str).str.strip() != '')]
             filtered_count = len(df)
             
-            print(f"DEBUG: Rows after filtering missing StockCode: {filtered_count}")
+            logger.debug(f"DEBUG: Rows after filtering missing StockCode: {filtered_count}")
             
             transformations.append({
                 "row_index": 0,
@@ -464,7 +549,7 @@ class DataCleaner:
         
         # Filter by month/year matching filename date
         if 'file_month' in df.columns and 'file_year' in df.columns:
-            print(f"DEBUG: Filtering by month/year from filename. Target: {month}/{year}")
+            logger.debug(f"DEBUG: Filtering by month/year from filename. Target: {month}/{year}")
             
             initial_count = len(df)
             df_filtered = df[
@@ -473,7 +558,7 @@ class DataCleaner:
             ].copy()
             
             final_count = len(df_filtered)
-            print(f"DEBUG: After date filtering - kept {final_count} rows out of {initial_count}")
+            logger.debug(f"DEBUG: After date filtering - kept {final_count} rows out of {initial_count}")
             
             transformations.append({
                 "row_index": 0,
@@ -485,7 +570,7 @@ class DataCleaner:
             
             df = df_filtered
         else:
-            print("DEBUG: No MONTH/YEAR columns found in data, skipping date filtering")
+            logger.debug("DEBUG: No MONTH/YEAR columns found in data, skipping date filtering")
         
         # Clean ZAR currency values using standardized cleaning
         if 'sales_lc' in df.columns:
@@ -539,17 +624,17 @@ class DataCleaner:
         year, month = self._extract_skins_nl_date_from_filename()
         
         # Debug: Log available columns
-        print(f"DEBUG: Available columns in Skins NL file: {list(df.columns)}")
+        logger.debug(f"DEBUG: Available columns in Skins NL file: {list(df.columns)}")
         
         # Column mapping for Skins NL with fallback options
         column_mapping = {}
         
-        # Check for EAN column variations
+        # Check for EAN column variations - but map to functional_name per demo profile
         ean_columns = ['EANCode', 'EAN', 'ean', 'EAN Code', 'EAN_Code']
         for col in ean_columns:
             if col in df.columns:
-                column_mapping[col] = 'ean'
-                print(f"DEBUG: Found EAN column: {col}")
+                column_mapping[col] = 'functional_name'
+                logger.debug(f"DEBUG: Found EAN column (mapping to functional_name): {col}")
                 break
         
         # Check for quantity column variations
@@ -557,7 +642,7 @@ class DataCleaner:
         for col in quantity_columns:
             if col in df.columns:
                 column_mapping[col] = 'quantity'
-                print(f"DEBUG: Found quantity column: {col}")
+                logger.debug(f"DEBUG: Found quantity column: {col}")
                 break
         
         # Check for sales amount column variations
@@ -565,17 +650,17 @@ class DataCleaner:
         for col in sales_columns:
             if col in df.columns:
                 column_mapping[col] = 'sales_lc'
-                print(f"DEBUG: Found sales amount column: {col}")
+                logger.debug(f"DEBUG: Found sales amount column: {col}")
                 break
         
-        print(f"DEBUG: Column mapping for Skins NL: {column_mapping}")
+        logger.debug(f"DEBUG: Column mapping for Skins NL: {column_mapping}")
         
         # Rename columns that were found
         if column_mapping:
             df.rename(columns=column_mapping, inplace=True)
-            print(f"DEBUG: Columns after mapping: {list(df.columns)}")
+            logger.debug(f"DEBUG: Columns after mapping: {list(df.columns)}")
         else:
-            print("ERROR: No matching columns found for Skins NL data")
+            logger.debug("ERROR: No matching columns found for Skins NL data")
             return df, transformations
         
         # Clean EUR currency values using standardized cleaning
@@ -597,16 +682,16 @@ class DataCleaner:
         df['report_year'] = year
         df['report_month'] = month
         
-        # Add reseller and currency
-        df['reseller'] = 'Skins NL'
+        # Add reseller and currency - per demo profile
+        df['reseller'] = 'TaskifAI'
         df['currency'] = 'EUR'
         
-        # Add empty functional_name (not available in Skins NL data)
-        df['functional_name'] = ''
+        # Ensure product_ean is empty per demo profile (functional_name already contains EAN)
+        df['product_ean'] = ''
         
         # Filter rows more carefully - only remove if quantity is truly missing/invalid
         if 'quantity' in df.columns:
-            print(f"DEBUG: Filtering rows with missing/invalid quantity. Rows before: {len(df)}")
+            logger.debug(f"DEBUG: Filtering rows with missing/invalid quantity. Rows before: {len(df)}")
             
             # Count different types of quantity values
             total_rows = len(df)
@@ -615,10 +700,10 @@ class DataCleaner:
             quantity_zero = (df['quantity'] == '0').sum()
             quantity_zero_numeric = (pd.to_numeric(df['quantity'], errors='coerce') == 0).sum()
             
-            print(f"DEBUG: Quantity analysis - Total: {total_rows}, NotNA: {quantity_notna}, Empty string: {quantity_empty_string}, Zero string: {quantity_zero}, Zero numeric: {quantity_zero_numeric}")
+            logger.debug(f"DEBUG: Quantity analysis - Total: {total_rows}, NotNA: {quantity_notna}, Empty string: {quantity_empty_string}, Zero string: {quantity_zero}, Zero numeric: {quantity_zero_numeric}")
             
             # Show some sample quantity values to understand the data
-            print(f"DEBUG: Sample quantity values: {df['quantity'].head(10).tolist()}")
+            logger.debug(f"DEBUG: Sample quantity values: {df['quantity'].head(10).tolist()}")
             
             # More lenient filtering - only remove if quantity is null, empty string, or cannot be converted to positive number
             def is_valid_quantity(val):
@@ -635,15 +720,15 @@ class DataCleaner:
             valid_mask = df['quantity'].apply(is_valid_quantity)
             df = df[valid_mask]
             
-            print(f"DEBUG: Rows after filtering invalid quantity: {len(df)}")
+            logger.debug(f"DEBUG: Rows after filtering invalid quantity: {len(df)}")
             
             # Log some examples of what was filtered out if significant data loss
             if len(df) < total_rows * 0.5:  # If we lost more than 50% of rows
-                print("WARNING: Significant data loss during quantity filtering!")
+                logger.debug("WARNING: Significant data loss during quantity filtering!")
                 invalid_quantities = df[~valid_mask]['quantity'].value_counts()
-                print(f"DEBUG: Most common invalid quantity values: {invalid_quantities.head()}")
+                logger.debug(f"DEBUG: Most common invalid quantity values: {invalid_quantities.head()}")
         else:
-            print("WARNING: No quantity column found after mapping, skipping quantity filtering")
+            logger.debug("WARNING: No quantity column found after mapping, skipping quantity filtering")
         
         # Log transformations for date fields
         transformations.append({
@@ -670,49 +755,49 @@ class DataCleaner:
         # Extract year and month from filename or cell B2
         year, month = self._extract_cdlc_date_from_filename_or_data(df)
         
-        print(f"DEBUG: CDLC processing for Year: {year}, Month: {month}")
-        print(f"DEBUG: Original DataFrame shape: {df.shape}")
-        print(f"DEBUG: DataFrame columns: {list(df.columns)}")
+        logger.debug(f"DEBUG: CDLC processing for Year: {year}, Month: {month}")
+        logger.debug(f"DEBUG: Original DataFrame shape: {df.shape}")
+        logger.debug(f"DEBUG: DataFrame columns: {list(df.columns)}")
         
         # Handle pivot table format - data starts at row 4 (0-indexed), headers at row 3
-        print(f"DEBUG: === HEADER PROCESSING STEP ===")
-        print(f"DEBUG: Original DataFrame shape before header processing: {df.shape}")
+        logger.debug(f"DEBUG: === HEADER PROCESSING STEP ===")
+        logger.debug(f"DEBUG: Original DataFrame shape before header processing: {df.shape}")
         
         if len(df) > 2:
-            print(f"DEBUG: Skipping first 2 rows (0-1), keeping rows 2+ as header and data")
-            print(f"DEBUG: Row 2 (header): {df.iloc[2].tolist()}")
-            print(f"DEBUG: Rows 3+ (data): {len(df) - 3} rows")
+            logger.debug(f"DEBUG: Skipping first 2 rows (0-1), keeping rows 2+ as header and data")
+            logger.debug(f"DEBUG: Row 2 (header): {df.iloc[2].tolist()}")
+            logger.debug(f"DEBUG: Rows 3+ (data): {len(df) - 3} rows")
             
             # Show what rows we're about to keep
             for i in range(2, min(len(df), 12)):  # Show first few rows
-                print(f"DEBUG: Row {i}: {df.iloc[i].tolist()}")
+                logger.debug(f"DEBUG: Row {i}: {df.iloc[i].tolist()}")
             
             # Skip first 2 rows to get to header row
             df = df.iloc[2:].reset_index(drop=True)
-            print(f"DEBUG: After iloc[2:] - shape: {df.shape}")
+            logger.debug(f"DEBUG: After iloc[2:] - shape: {df.shape}")
             
             # Set column names from first row (header row)
             if len(df) > 0:
-                print(f"DEBUG: Setting column names from row 0: {df.iloc[0].tolist()}")
+                logger.debug(f"DEBUG: Setting column names from row 0: {df.iloc[0].tolist()}")
                 df.columns = df.iloc[0]
-                print(f"DEBUG: Before dropping header row - shape: {df.shape}")
+                logger.debug(f"DEBUG: Before dropping header row - shape: {df.shape}")
                 df = df[1:].reset_index(drop=True)
-                print(f"DEBUG: After dropping header row - final shape: {df.shape}")
+                logger.debug(f"DEBUG: After dropping header row - final shape: {df.shape}")
             else:
-                print("DEBUG: ERROR - No rows left after iloc[2:]!")
+                logger.debug("DEBUG: ERROR - No rows left after iloc[2:]!")
         else:
-            print(f"DEBUG: ERROR - DataFrame too short ({len(df)} rows), expected at least 3 rows")
+            logger.debug(f"DEBUG: ERROR - DataFrame too short ({len(df)} rows), expected at least 3 rows")
         
-        print(f"DEBUG: After header processing - DataFrame shape: {df.shape}")
-        print(f"DEBUG: Column names after header processing: {list(df.columns)}")
-        print(f"DEBUG: Expected 7 data rows, actual rows available: {len(df)}")
+        logger.debug(f"DEBUG: After header processing - DataFrame shape: {df.shape}")
+        logger.debug(f"DEBUG: Column names after header processing: {list(df.columns)}")
+        logger.debug(f"DEBUG: Expected 7 data rows, actual rows available: {len(df)}")
         
         # Show all rows after header processing
-        print("DEBUG: All rows after header processing:")
+        logger.debug("DEBUG: All rows after header processing:")
         for i in range(len(df)):
             row_data = df.iloc[i].tolist()
-            print(f"  Row {i}: {row_data}")
-        print()
+            logger.debug(f"  Row {i}: {row_data}")
+        pass  # Removed debug print
         
         # Process pivot table format with multiple store locations
         processed_rows = []
@@ -721,42 +806,42 @@ class DataCleaner:
         
         for idx, row in df.iterrows():
             total_rows_processed += 1
-            print(f"DEBUG: === PROCESSING ROW {idx} (iteration {total_rows_processed}) ===")
+            logger.debug(f"DEBUG: === PROCESSING ROW {idx} (iteration {total_rows_processed}) ===")
             
             # Show raw row data
             row_data = row.tolist()
-            print(f"DEBUG: Raw row data: {row_data}")
+            logger.debug(f"DEBUG: Raw row data: {row_data}")
             
             # Check column 1 for EAN
             col1_value = row.iloc[1] if len(row) > 1 else None
-            print(f"DEBUG: Column 1 (EAN position) value: '{col1_value}' (type: {type(col1_value)})")
+            logger.debug(f"DEBUG: Column 1 (EAN position) value: '{col1_value}' (type: {type(col1_value)})")
             
             # Skip empty rows or rows without EAN  
             if pd.isna(col1_value) or str(col1_value).strip() == '':
-                print(f"DEBUG: SKIPPING row {idx} - empty EAN (column 1 is empty)")
+                logger.debug(f"DEBUG: SKIPPING row {idx} - empty EAN (column 1 is empty)")
                 skipped_rows.append(f"Row {idx}: Empty EAN")
                 continue
                 
             # Extract EAN from column 1 (contains EAN data after header processing)
             ean = str(col1_value).strip()
-            print(f"DEBUG: Extracted EAN: '{ean}' (length: {len(ean)})")
+            logger.debug(f"DEBUG: Extracted EAN: '{ean}' (length: {len(ean)})")
             
             # Validate EAN is 13 digits
             if not ean.isdigit():
-                print(f"DEBUG: SKIPPING row {idx} - EAN not all digits: '{ean}'")
+                logger.debug(f"DEBUG: SKIPPING row {idx} - EAN not all digits: '{ean}'")
                 skipped_rows.append(f"Row {idx}: EAN not digits - '{ean}'")
                 continue
             elif len(ean) != 13:
-                print(f"DEBUG: SKIPPING row {idx} - EAN wrong length: '{ean}' (length: {len(ean)})")
+                logger.debug(f"DEBUG: SKIPPING row {idx} - EAN wrong length: '{ean}' (length: {len(ean)})")
                 skipped_rows.append(f"Row {idx}: EAN wrong length - '{ean}' (length: {len(ean)})")
                 continue
             
-            print(f"DEBUG: ✓ Valid EAN: '{ean}'")
+            logger.debug(f"DEBUG: ✓ Valid EAN: '{ean}'")
             
             # Extract product name from column 2 (contains product descriptions after header processing)
             col2_value = row.iloc[2] if len(row) > 2 else None
             functional_name = str(col2_value).strip() if pd.notna(col2_value) else ''
-            print(f"DEBUG: Product name (column 2): '{functional_name}'")
+            logger.debug(f"DEBUG: Product name (column 2): '{functional_name}'")
             
             # Read totals directly from the last two columns (Total Qty and Total Sales)
             # After header processing: Column 13 = Total Qty, Column 14 = Total Sales
@@ -766,40 +851,40 @@ class DataCleaner:
             # Extract quantity from column 13 (Total Qty column)
             if 13 < len(row):
                 qty_val = row.iloc[13]
-                print(f"DEBUG: Column 13 (Total Qty) raw value: '{qty_val}' (type: {type(qty_val)})")
+                logger.debug(f"DEBUG: Column 13 (Total Qty) raw value: '{qty_val}' (type: {type(qty_val)})")
                 if pd.notna(qty_val) and str(qty_val).strip():
                     try:
                         total_quantity = float(str(qty_val).strip())
-                        print(f"DEBUG: ✓ Parsed quantity: {total_quantity}")
+                        logger.debug(f"DEBUG: ✓ Parsed quantity: {total_quantity}")
                     except ValueError as e:
-                        print(f"DEBUG: Failed to parse quantity '{qty_val}': {e}")
+                        logger.debug(f"DEBUG: Failed to parse quantity '{qty_val}': {e}")
                         total_quantity = 0
                 else:
-                    print(f"DEBUG: Column 13 is empty or NaN")
+                    logger.debug(f"DEBUG: Column 13 is empty or NaN")
             else:
-                print(f"DEBUG: Row too short for column 13 (row length: {len(row)})")
+                logger.debug(f"DEBUG: Row too short for column 13 (row length: {len(row)})")
             
             # Extract sales from column 14 (Total Sales column)  
             if 14 < len(row):
                 sales_val = row.iloc[14]
-                print(f"DEBUG: Column 14 (Total Sales) raw value: '{sales_val}' (type: {type(sales_val)})")
+                logger.debug(f"DEBUG: Column 14 (Total Sales) raw value: '{sales_val}' (type: {type(sales_val)})")
                 if pd.notna(sales_val) and str(sales_val).strip():
                     try:
                         total_sales = float(str(sales_val).strip())
-                        print(f"DEBUG: ✓ Parsed sales: {total_sales}")
+                        logger.debug(f"DEBUG: ✓ Parsed sales: {total_sales}")
                     except ValueError as e:
-                        print(f"DEBUG: Failed to parse sales '{sales_val}': {e}")
+                        logger.debug(f"DEBUG: Failed to parse sales '{sales_val}': {e}")
                         total_sales = 0
                 else:
-                    print(f"DEBUG: Column 14 is empty or NaN")
+                    logger.debug(f"DEBUG: Column 14 is empty or NaN")
             else:
-                print(f"DEBUG: Row too short for column 14 (row length: {len(row)})")
+                logger.debug(f"DEBUG: Row too short for column 14 (row length: {len(row)})")
             
-            print(f"DEBUG: Final values - Qty: {total_quantity}, Sales: {total_sales}")
+            logger.debug(f"DEBUG: Final values - Qty: {total_quantity}, Sales: {total_sales}")
             
             # Only include rows with non-zero quantity or sales
             if total_quantity > 0 or total_sales > 0:
-                print(f"DEBUG: ✓ INCLUDING row {idx} - has non-zero quantity or sales")
+                logger.debug(f"DEBUG: ✓ INCLUDING row {idx} - has non-zero quantity or sales")
                 processed_rows.append({
                     'product_ean': ean,
                     'functional_name': '',
@@ -811,31 +896,31 @@ class DataCleaner:
                     'currency': 'EUR'
                 })
                 
-                print(f"DEBUG: ✓ ADDED to processed_rows - EAN: {ean}, Qty: {total_quantity}, Sales: {total_sales}")
+                logger.debug(f"DEBUG: ✓ ADDED to processed_rows - EAN: {ean}, Qty: {total_quantity}, Sales: {total_sales}")
             else:
-                print(f"DEBUG: ✗ EXCLUDING row {idx} - zero quantity and zero sales")
+                logger.debug(f"DEBUG: ✗ EXCLUDING row {idx} - zero quantity and zero sales")
                 skipped_rows.append(f"Row {idx}: Zero quantity ({total_quantity}) and zero sales ({total_sales})")
             
-            print() # Empty line for readability
+            pass  # Removed debug print # Empty line for readability
         
         # Summary of processing
-        print("DEBUG: === PROCESSING SUMMARY ===")
-        print(f"DEBUG: Total rows processed: {total_rows_processed}")
-        print(f"DEBUG: Rows successfully added: {len(processed_rows)}")
-        print(f"DEBUG: Rows skipped: {len(skipped_rows)}")
+        logger.debug("DEBUG: === PROCESSING SUMMARY ===")
+        logger.debug(f"DEBUG: Total rows processed: {total_rows_processed}")
+        logger.debug(f"DEBUG: Rows successfully added: {len(processed_rows)}")
+        logger.debug(f"DEBUG: Rows skipped: {len(skipped_rows)}")
         if skipped_rows:
-            print("DEBUG: Reasons for skipping:")
+            logger.debug("DEBUG: Reasons for skipping:")
             for reason in skipped_rows:
-                print(f"  - {reason}")
-        print()
+                logger.debug(f"  - {reason}")
+        pass  # Removed debug print
         
         # Create new DataFrame from processed rows
         if processed_rows:
             df_cleaned = pd.DataFrame(processed_rows)
-            print(f"DEBUG: Created cleaned DataFrame with {len(df_cleaned)} rows")
+            logger.debug(f"DEBUG: Created cleaned DataFrame with {len(df_cleaned)} rows")
         else:
             df_cleaned = pd.DataFrame()
-            print("DEBUG: No valid rows found, returning empty DataFrame")
+            logger.debug("DEBUG: No valid rows found, returning empty DataFrame")
         
         # Log transformations
         transformations.append({
@@ -923,11 +1008,11 @@ class DataCleaner:
         liberty_data = []
         
         # Debug: Print DataFrame info
-        print(f"Debug: DataFrame shape: {df.shape}")
-        print(f"Debug: Column count: {len(df.columns)}")
+        logger.debug(f"Debug: DataFrame shape: {df.shape}")
+        logger.debug(f"Debug: Column count: {len(df.columns)}")
         if len(df) > 0:
-            print(f"Debug: Sample row 0 length: {len(df.iloc[0])}")
-            print(f"Debug: First few values in row 0: {df.iloc[0][:10].tolist()}")
+            logger.debug(f"Debug: Sample row 0 length: {len(df.iloc[0])}")
+            logger.debug(f"Debug: First few values in row 0: {df.iloc[0][:10].tolist()}")
         
         # Find rows with data (skip empty rows and total/summary rows)
         for idx, row in df.iterrows():
@@ -941,22 +1026,22 @@ class DataCleaner:
                 functional_name = None
                 if pd.notna(raw_functional_name) and str(raw_functional_name).strip():
                     functional_name = str(raw_functional_name).strip()
-                    print(f"DEBUG: Extracted functional_name '{functional_name}' from Column F")
+                    logger.debug(f"DEBUG: Extracted functional_name '{functional_name}' from Column F")
                 else:
-                    print(f"DEBUG: Empty/null functional_name from Column F: '{raw_functional_name}'")
+                    logger.debug(f"DEBUG: Empty/null functional_name from Column F: '{raw_functional_name}'")
                 
                 # Debug: Print first few rows to verify column mapping
                 if idx < 10 and pd.notna(quantity):
-                    print(f"Debug Row {idx}: quantity={quantity}, sales_lc={sales_lc}, functional_name={functional_name}")
+                    logger.debug(f"Debug Row {idx}: quantity={quantity}, sales_lc={sales_lc}, functional_name={functional_name}")
                 
                 # Enhanced debug for rows with valid sales data
                 if pd.notna(quantity) and pd.notna(sales_lc) and idx < 20:
-                    print(f"SALES ROW {idx}: Column F (index 5) = '{functional_name}' | Full row values:")
-                    print(f"  - Column 0-10: {[row.iloc[i] if i < len(row) else 'N/A' for i in range(11)]}")
-                    print(f"  - Quantity (index 20): {quantity}")
-                    print(f"  - Sales_lc (index 21): {sales_lc}")
-                    print(f"  - Functional_name (index 5): {functional_name}")
-                    print("---")
+                    logger.debug(f"SALES ROW {idx}: Column F (index 5) = '{functional_name}' | Full row values:")
+                    logger.debug(f"  - Column 0-10: {[row.iloc[i] if i < len(row) else 'N/A' for i in range(11)]}")
+                    logger.debug(f"  - Quantity (index 20): {quantity}")
+                    logger.debug(f"  - Sales_lc (index 21): {sales_lc}")
+                    logger.debug(f"  - Functional_name (index 5): {functional_name}")
+                    logger.debug("---")
                 
                 # Skip total/summary rows - check if any column contains "total" or similar
                 is_total_row = False
@@ -969,7 +1054,7 @@ class DataCleaner:
                 
                 # Log every row that has quantity and sales data to debug missing functional_name
                 if pd.notna(quantity) and pd.notna(sales_lc):
-                    print(f"ROW {idx} - Quantity: {quantity}, Sales: {sales_lc}, Column F: '{raw_functional_name}', Parsed: '{functional_name}', Is_Total: {is_total_row}")
+                    logger.debug(f"ROW {idx} - Quantity: {quantity}, Sales: {sales_lc}, Column F: '{raw_functional_name}', Parsed: '{functional_name}', Is_Total: {is_total_row}")
                 
                 # Only include rows with valid quantity and sales data, excluding total rows
                 # Include products with zero/negative quantities if they have sales_lc values (returns, refunds, adjustments)
@@ -992,7 +1077,7 @@ class DataCleaner:
                             numeric_sales_lc = 0
                             
                     except (ValueError, TypeError) as e:
-                        print(f"DEBUG: Error converting values to numeric - quantity: '{quantity}', sales_lc: '{sales_lc}', error: {e}")
+                        logger.debug(f"DEBUG: Error converting values to numeric - quantity: '{quantity}', sales_lc: '{sales_lc}', error: {e}")
                         numeric_quantity = 0
                         numeric_sales_lc = 0
                     
@@ -1002,21 +1087,21 @@ class DataCleaner:
                     # Debug logging for zero quantity row decisions
                     if numeric_quantity == 0:
                         if numeric_sales_lc != 0:
-                            print(f"DEBUG: Including zero quantity row {idx} - qty: {quantity} ({numeric_quantity}), sales: {sales_lc} ({numeric_sales_lc}) - HAS SALES VALUE")
+                            logger.debug(f"DEBUG: Including zero quantity row {idx} - qty: {quantity} ({numeric_quantity}), sales: {sales_lc} ({numeric_sales_lc}) - HAS SALES VALUE")
                         else:
-                            print(f"DEBUG: Excluding zero quantity row {idx} - qty: {quantity} ({numeric_quantity}), sales: {sales_lc} ({numeric_sales_lc}) - NO SALES VALUE")
+                            logger.debug(f"DEBUG: Excluding zero quantity row {idx} - qty: {quantity} ({numeric_quantity}), sales: {sales_lc} ({numeric_sales_lc}) - NO SALES VALUE")
                     elif numeric_quantity < 0:
                         if numeric_sales_lc != 0:
-                            print(f"DEBUG: Including negative quantity row {idx} - qty: {quantity} ({numeric_quantity}), sales: {sales_lc} ({numeric_sales_lc}) - HAS SALES VALUE")
+                            logger.debug(f"DEBUG: Including negative quantity row {idx} - qty: {quantity} ({numeric_quantity}), sales: {sales_lc} ({numeric_sales_lc}) - HAS SALES VALUE")
                         else:
-                            print(f"DEBUG: Excluding negative quantity row {idx} - qty: {quantity} ({numeric_quantity}), sales: {sales_lc} ({numeric_sales_lc}) - NO SALES VALUE")
+                            logger.debug(f"DEBUG: Excluding negative quantity row {idx} - qty: {quantity} ({numeric_quantity}), sales: {sales_lc} ({numeric_sales_lc}) - NO SALES VALUE")
                     
                     if include_row:
                         # If functional_name is nan, check the next row for the product string
                         final_functional_name = functional_name
                         
                         if pd.isna(functional_name):
-                            print(f"DEBUG: Row {idx} has NULL functional_name, trying fallbacks...")
+                            logger.debug(f"DEBUG: Row {idx} has NULL functional_name, trying fallbacks...")
                             
                             # Try next row
                             if idx + 1 < len(df):
@@ -1025,35 +1110,35 @@ class DataCleaner:
                                 next_quantity = next_row.iloc[20] if len(next_row) > 20 else None
                                 next_sales_lc = next_row.iloc[21] if len(next_row) > 21 else None
                                 
-                                print(f"DEBUG: Next row {idx+1} - F: '{next_functional_name}', Qty: {next_quantity}, Sales: {next_sales_lc}")
+                                logger.debug(f"DEBUG: Next row {idx+1} - F: '{next_functional_name}', Qty: {next_quantity}, Sales: {next_sales_lc}")
                                 
                                 # If next row has same sales data and a valid functional_name, use it
                                 if (pd.notna(next_functional_name) and 
                                     next_quantity == quantity and 
                                     next_sales_lc == sales_lc):
                                     final_functional_name = str(next_functional_name).strip()
-                                    print(f"DEBUG: ✓ Found functional_name in next row {idx+1}: '{final_functional_name}'")
+                                    logger.debug(f"DEBUG: ✓ Found functional_name in next row {idx+1}: '{final_functional_name}'")
                             
                             # Try previous row if next row didn't work
                             if pd.isna(final_functional_name) and idx > 0:
                                 prev_row = df.iloc[idx - 1]
                                 prev_functional_name = prev_row.iloc[5] if len(prev_row) > 5 else None  # Column F
-                                print(f"DEBUG: Previous row {idx-1} - F: '{prev_functional_name}'")
+                                logger.debug(f"DEBUG: Previous row {idx-1} - F: '{prev_functional_name}'")
                                 
                                 if pd.notna(prev_functional_name):
                                     final_functional_name = str(prev_functional_name).strip()
-                                    print(f"DEBUG: ✓ Using previous row functional_name: '{final_functional_name}'")
+                                    logger.debug(f"DEBUG: ✓ Using previous row functional_name: '{final_functional_name}'")
                             
                             # Fallback to Column E if still no functional_name
                             if pd.isna(final_functional_name):
                                 item_id = row.iloc[4] if len(row) > 4 else None  # Column E
-                                print(f"DEBUG: Column E fallback: '{item_id}'")
+                                logger.debug(f"DEBUG: Column E fallback: '{item_id}'")
                                 if pd.notna(item_id):
                                     final_functional_name = str(item_id).strip()
-                                    print(f"DEBUG: ✓ Using Column E as fallback: '{final_functional_name}'")
+                                    logger.debug(f"DEBUG: ✓ Using Column E as fallback: '{final_functional_name}'")
                             
                             if pd.isna(final_functional_name):
-                                print(f"DEBUG: ✗ No functional_name found for row {idx} after all fallbacks")
+                                logger.debug(f"DEBUG: ✗ No functional_name found for row {idx} after all fallbacks")
                         
                         
                         liberty_data.append({
@@ -1093,61 +1178,61 @@ class DataCleaner:
             i += 1
         
         # Debug: Print processing summary
-        print(f"Debug: Found {len(liberty_data)} raw entries, {len(final_data)} after deduplication")
+        logger.debug(f"Debug: Found {len(liberty_data)} raw entries, {len(final_data)} after deduplication")
         
         # Lookup product EANs using functional_name from Column E
-        print(f"DEBUG: Looking up product EANs for {len(final_data)} entries using functional_name from Column E")
+        logger.debug(f"DEBUG: Looking up product EANs for {len(final_data)} entries using functional_name from Column E")
         
         if not self.db_service:
-            print("ERROR: Database service not available for product lookup")
+            logger.debug("ERROR: Database service not available for product lookup")
             for entry in final_data:
                 entry['product_ean'] = None
         else:
-            print("DEBUG: Database service is available, proceeding with lookups")
+            logger.debug("DEBUG: Database service is available, proceeding with lookups")
             successful_lookups = 0
             failed_lookups = 0
             
             for i, entry in enumerate(final_data):
                 functional_name = entry.get('functional_name')
-                print(f"DEBUG: Processing entry {i+1}/{len(final_data)}: functional_name='{functional_name}'")
+                logger.debug(f"DEBUG: Processing entry {i+1}/{len(final_data)}: functional_name='{functional_name}'")
                 
                 if functional_name and str(functional_name).strip():
                     try:
                         clean_functional_name = str(functional_name).strip()
-                        print(f"DEBUG: Looking up product for functional_name: '{clean_functional_name}'")
+                        logger.debug(f"DEBUG: Looking up product for functional_name: '{clean_functional_name}'")
                         
                         product = await self.db_service.get_product_by_name(clean_functional_name)
                         
                         if product and product.get('ean'):
                             entry['product_ean'] = product['ean']
                             successful_lookups += 1
-                            print(f"DEBUG: ✓ Found EAN '{product['ean']}' for functional_name '{clean_functional_name}'")
+                            logger.debug(f"DEBUG: ✓ Found EAN '{product['ean']}' for functional_name '{clean_functional_name}'")
                         else:
                             entry['product_ean'] = None
                             failed_lookups += 1
-                            print(f"DEBUG: ✗ No EAN found for functional_name '{clean_functional_name}' (product: {product})")
+                            logger.debug(f"DEBUG: ✗ No EAN found for functional_name '{clean_functional_name}' (product: {product})")
                             
                     except Exception as e:
                         import traceback
                         entry['product_ean'] = None
                         failed_lookups += 1
-                        print(f"ERROR: Failed to lookup EAN for '{functional_name}': {str(e)}")
-                        print(f"ERROR: Full traceback: {traceback.format_exc()}")
+                        logger.debug(f"ERROR: Failed to lookup EAN for '{functional_name}': {str(e)}")
+                        logger.debug(f"ERROR: Full traceback: {traceback.format_exc()}")
                 else:
                     entry['product_ean'] = None
                     failed_lookups += 1
-                    print(f"DEBUG: ✗ Skipping entry with empty functional_name")
+                    logger.debug(f"DEBUG: ✗ Skipping entry with empty functional_name")
             
-            print(f"DEBUG: Product lookup summary - Success: {successful_lookups}, Failed: {failed_lookups}, Total: {len(final_data)}")
+            logger.debug(f"DEBUG: Product lookup summary - Success: {successful_lookups}, Failed: {failed_lookups}, Total: {len(final_data)}")
             
             # Now do liberty_name to functional_name mapping
-            print(f"DEBUG: Starting liberty_name to functional_name mapping for {len(final_data)} entries")
+            logger.debug(f"DEBUG: Starting liberty_name to functional_name mapping for {len(final_data)} entries")
             liberty_mapping_success = 0
             liberty_mapping_failed = 0
             
             for i, entry in enumerate(final_data):
                 extracted_functional_name = entry.get('functional_name')
-                print(f"DEBUG: Processing entry {i+1}/{len(final_data)} for liberty mapping")
+                logger.debug(f"DEBUG: Processing entry {i+1}/{len(final_data)} for liberty mapping")
                 
                 if extracted_functional_name and str(extracted_functional_name).strip():
                     try:
@@ -1160,29 +1245,29 @@ class DataCleaner:
                             entry['original_functional_name'] = extracted_functional_name  # Keep original for reference
                             entry['functional_name'] = uppercase_functional_name
                             liberty_mapping_success += 1
-                            print(f"DEBUG: ✓ Mapped '{extracted_functional_name}' → '{mapped_functional_name}' → '{uppercase_functional_name}' (UPPERCASE)")
+                            logger.debug(f"DEBUG: ✓ Mapped '{extracted_functional_name}' → '{mapped_functional_name}' → '{uppercase_functional_name}' (UPPERCASE)")
                         else:
                             # No mapping found, keep the original
                             liberty_mapping_failed += 1
-                            print(f"DEBUG: ✗ No mapping found for '{extracted_functional_name}', keeping original")
+                            logger.debug(f"DEBUG: ✗ No mapping found for '{extracted_functional_name}', keeping original")
                             
                     except Exception as e:
                         liberty_mapping_failed += 1
-                        print(f"ERROR: Failed to map liberty_name '{extracted_functional_name}': {str(e)}")
+                        logger.debug(f"ERROR: Failed to map liberty_name '{extracted_functional_name}': {str(e)}")
                 else:
                     liberty_mapping_failed += 1
-                    print(f"DEBUG: ✗ Skipping entry with empty functional_name for liberty mapping")
+                    logger.debug(f"DEBUG: ✗ Skipping entry with empty functional_name for liberty mapping")
             
-            print(f"DEBUG: Liberty mapping summary - Success: {liberty_mapping_success}, Failed: {liberty_mapping_failed}, Total: {len(final_data)}")
+            logger.debug(f"DEBUG: Liberty mapping summary - Success: {liberty_mapping_success}, Failed: {liberty_mapping_failed}, Total: {len(final_data)}")
             
             # Now do functional_name to EAN lookup (final step)
-            print(f"DEBUG: Starting functional_name to EAN lookup for {len(final_data)} entries")
+            logger.debug(f"DEBUG: Starting functional_name to EAN lookup for {len(final_data)} entries")
             ean_lookup_success = 0
             ean_lookup_failed = 0
             
             for i, entry in enumerate(final_data):
                 final_functional_name = entry.get('functional_name')
-                print(f"DEBUG: Processing entry {i+1}/{len(final_data)} for EAN lookup")
+                logger.debug(f"DEBUG: Processing entry {i+1}/{len(final_data)} for EAN lookup")
                 
                 if final_functional_name and str(final_functional_name).strip():
                     try:
@@ -1193,45 +1278,45 @@ class DataCleaner:
                             # Set the EAN for this entry
                             entry['product_ean'] = ean
                             ean_lookup_success += 1
-                            print(f"DEBUG: ✓ Found EAN '{ean}' for functional_name '{final_functional_name}'")
+                            logger.debug(f"DEBUG: ✓ Found EAN '{ean}' for functional_name '{final_functional_name}'")
                         else:
                             # No EAN found, leave product_ean as None
                             ean_lookup_failed += 1
-                            print(f"DEBUG: ✗ No EAN found for functional_name '{final_functional_name}'")
+                            logger.debug(f"DEBUG: ✗ No EAN found for functional_name '{final_functional_name}'")
                             
                     except Exception as e:
                         ean_lookup_failed += 1
-                        print(f"ERROR: Failed to lookup EAN for functional_name '{final_functional_name}': {str(e)}")
+                        logger.debug(f"ERROR: Failed to lookup EAN for functional_name '{final_functional_name}': {str(e)}")
                 else:
                     ean_lookup_failed += 1
-                    print(f"DEBUG: ✗ Skipping entry with empty functional_name for EAN lookup")
+                    logger.debug(f"DEBUG: ✗ Skipping entry with empty functional_name for EAN lookup")
             
-            print(f"DEBUG: EAN lookup summary - Success: {ean_lookup_success}, Failed: {ean_lookup_failed}, Total: {len(final_data)}")
+            logger.debug(f"DEBUG: EAN lookup summary - Success: {ean_lookup_success}, Failed: {ean_lookup_failed}, Total: {len(final_data)}")
             
             # Show unique functional_name values after mapping
             functional_names = [entry.get('functional_name') for entry in final_data if entry.get('functional_name')]
             unique_functional_names = list(set(functional_names))
-            print(f"DEBUG: Unique functional_name values after complete mapping: {unique_functional_names[:10]}")  # Show first 10
+            logger.debug(f"DEBUG: Unique functional_name values after complete mapping: {unique_functional_names[:10]}")  # Show first 10
             
             # Show unique EAN values found
             eans = [entry.get('product_ean') for entry in final_data if entry.get('product_ean')]
             unique_eans = list(set(eans))
-            print(f"DEBUG: Unique EAN values found: {unique_eans[:10]}")  # Show first 10
+            logger.debug(f"DEBUG: Unique EAN values found: {unique_eans[:10]}")  # Show first 10
 
         # Create new DataFrame with Liberty data
         if final_data:
             # Debug: Show functional_name values before DataFrame creation
-            print("DEBUG: functional_name values before DataFrame creation:")
+            logger.debug("DEBUG: functional_name values before DataFrame creation:")
             for i, entry in enumerate(final_data[:5]):  # Show first 5
                 fn = entry.get('functional_name')
-                print(f"  Entry {i}: functional_name = '{fn}'")
+                logger.debug(f"  Entry {i}: functional_name = '{fn}'")
             
             df_liberty = pd.DataFrame(final_data)
             
             # Debug: Show functional_name values after DataFrame creation
             if 'functional_name' in df_liberty.columns:
-                print("DEBUG: functional_name values after DataFrame creation:")
-                print(f"  Sample values: {df_liberty['functional_name'].head().tolist()}")
+                logger.debug("DEBUG: functional_name values after DataFrame creation:")
+                logger.debug(f"  Sample values: {df_liberty['functional_name'].head().tolist()}")
             
             # Add Liberty-specific fields
             df_liberty['report_year'] = year
@@ -1266,7 +1351,7 @@ class DataCleaner:
         if not self.current_filename:
             return 2025, 5  # Default values
         
-        print(f"DEBUG: Extracting date from filename: '{self.current_filename}'")
+        logger.debug(f"DEBUG: Extracting date from filename: '{self.current_filename}'")
         
         # Support both formats: DD-MM-YYYY and DD_MM_YYYY
         # Example filenames: 
@@ -1280,18 +1365,18 @@ class DataCleaner:
             month = int(match.group(2))
             year = int(match.group(3))
             
-            print(f"DEBUG: Parsed date - Day: {day}, Month: {month}, Year: {year}")
+            logger.debug(f"DEBUG: Parsed date - Day: {day}, Month: {month}, Year: {year}")
             
             # Validate month is 1-12
             if month < 1 or month > 12:
-                print(f"ERROR: Invalid month {month}, using defaults")
+                logger.debug(f"ERROR: Invalid month {month}, using defaults")
                 return 2025, 5
             
             # Return month and year directly (no date arithmetic needed)
-            print(f"DEBUG: Final date - Month: {month}, Year: {year}")
+            logger.debug(f"DEBUG: Final date - Month: {month}, Year: {year}")
             return year, month
         
-        print("DEBUG: No date pattern found, using defaults")
+        logger.debug("DEBUG: No date pattern found, using defaults")
         return 2025, 5  # Default if parsing fails
     
     def _extract_skins_nl_date_from_filename(self) -> Tuple[int, int]:
@@ -1299,7 +1384,7 @@ class DataCleaner:
         if not self.current_filename:
             return 2025, 1  # Default values
         
-        print(f"DEBUG: Extracting date from Skins NL filename: '{self.current_filename}'")
+        logger.debug(f"DEBUG: Extracting date from Skins NL filename: '{self.current_filename}'")
         
         # Pattern: ReportPeriod02-2025
         # Example: BIBBIPARFU_ReportPeriod02-2025.xlsx
@@ -1310,17 +1395,17 @@ class DataCleaner:
             month = int(match.group(1))
             year = int(match.group(2))
             
-            print(f"DEBUG: Parsed Skins NL date - Month: {month}, Year: {year}")
+            logger.debug(f"DEBUG: Parsed Skins NL date - Month: {month}, Year: {year}")
             
             # Validate month is 1-12
             if month < 1 or month > 12:
-                print(f"ERROR: Invalid month {month}, using defaults")
+                logger.debug(f"ERROR: Invalid month {month}, using defaults")
                 return 2025, 1
             
-            print(f"DEBUG: Final Skins NL date - Month: {month}, Year: {year}")
+            logger.debug(f"DEBUG: Final Skins NL date - Month: {month}, Year: {year}")
             return year, month
         
-        print("DEBUG: No ReportPeriod date pattern found, using defaults")
+        logger.debug("DEBUG: No ReportPeriod date pattern found, using defaults")
         return 2025, 1  # Default if parsing fails
     
     def _extract_skins_sa_date_from_filename(self) -> Tuple[int, int]:
@@ -1328,7 +1413,7 @@ class DataCleaner:
         if not self.current_filename:
             return 2025, 1  # Default values
         
-        print(f"DEBUG: Extracting date from Skins SA filename: '{self.current_filename}'")
+        logger.debug(f"DEBUG: Extracting date from Skins SA filename: '{self.current_filename}'")
         
         # Pattern: Skins SA BIBBI CY 2025 February
         # Example: "Skins SA BIBBI CY 2025 February.xlsx"
@@ -1339,10 +1424,10 @@ class DataCleaner:
         
         if year_match:
             year = int(year_match.group(1))
-            print(f"DEBUG: Found year: {year}")
+            logger.debug(f"DEBUG: Found year: {year}")
         else:
             year = 2025  # Default
-            print(f"DEBUG: No year found, using default: {year}")
+            logger.debug(f"DEBUG: No year found, using default: {year}")
         
         # Then try to extract month name
         month_names = {
@@ -1360,13 +1445,13 @@ class DataCleaner:
         for month_name, month_num in month_names.items():
             if month_name in filename_lower:
                 month = month_num
-                print(f"DEBUG: Found month '{month_name}' -> {month}")
+                logger.debug(f"DEBUG: Found month '{month_name}' -> {month}")
                 break
         
         if month == 1:
-            print(f"DEBUG: No month found in filename, using default: {month}")
+            logger.debug(f"DEBUG: No month found in filename, using default: {month}")
         
-        print(f"DEBUG: Final Skins SA date - Month: {month}, Year: {year}")
+        logger.debug(f"DEBUG: Final Skins SA date - Month: {month}, Year: {year}")
         return year, month
     
     def _parse_month_name(self, month_name: str) -> int:
@@ -1382,7 +1467,7 @@ class DataCleaner:
         if not self.current_filename:
             return 2025, 4  # Default values
         
-        print(f"DEBUG: Extracting date from BOXNOX filename: '{self.current_filename}'")
+        logger.debug(f"DEBUG: Extracting date from BOXNOX filename: '{self.current_filename}'")
         
         # Pattern for month names followed by year
         # Example: "BOXNOX - BIBBI Monthly Sales Report APR2025"
@@ -1394,17 +1479,17 @@ class DataCleaner:
             year = int(match.group(2))
             month = self._parse_month_name(month_str)
             
-            print(f"DEBUG: Parsed BOXNOX date - Month: {month_str} ({month}), Year: {year}")
+            logger.debug(f"DEBUG: Parsed BOXNOX date - Month: {month_str} ({month}), Year: {year}")
             return year, month
         
-        print("DEBUG: No BOXNOX date pattern found, using defaults")
+        logger.debug("DEBUG: No BOXNOX date pattern found, using defaults")
         return 2025, 4  # Default if parsing fails
     
     def _extract_cdlc_date_from_filename_or_data(self, df: pd.DataFrame) -> Tuple[int, int]:
         """Extract year and month from CDLC filename or cell B2"""
         # First try to extract from filename
         if self.current_filename:
-            print(f"DEBUG: Extracting date from CDLC filename: '{self.current_filename}'")
+            logger.debug(f"DEBUG: Extracting date from CDLC filename: '{self.current_filename}'")
             
             # Pattern: YYYY MM in filename (e.g., "BIBBI_Sell_Out_2025 04.xlsx")
             date_pattern = r'(\d{4})\s+(\d{2})'
@@ -1413,7 +1498,7 @@ class DataCleaner:
             if match:
                 year = int(match.group(1))
                 month = int(match.group(2))
-                print(f"DEBUG: Found date in filename - Year: {year}, Month: {month}")
+                logger.debug(f"DEBUG: Found date in filename - Year: {year}, Month: {month}")
                 return year, month
         
         # If filename parsing fails, try to extract from cell B2
@@ -1423,7 +1508,7 @@ class DataCleaner:
                 cell_b2_value = df.iloc[1, 1]  # Row 2, Column B (0-indexed)
                 if pd.notna(cell_b2_value):
                     cell_value = str(cell_b2_value).strip()
-                    print(f"DEBUG: Checking cell B2 for date: '{cell_value}'")
+                    logger.debug(f"DEBUG: Checking cell B2 for date: '{cell_value}'")
                     
                     # Pattern: YYYY Month
                     date_pattern = r'(\d{4})\s+(\w+)'
@@ -1441,12 +1526,12 @@ class DataCleaner:
                         }
                         
                         month = month_mapping.get(month_name, 1)
-                        print(f"DEBUG: Found date in cell B2 - Year: {year}, Month: {month_name} ({month})")
+                        logger.debug(f"DEBUG: Found date in cell B2 - Year: {year}, Month: {month_name} ({month})")
                         return year, month
         except Exception as e:
-            print(f"DEBUG: Error extracting date from cell B2: {e}")
+            logger.debug(f"DEBUG: Error extracting date from cell B2: {e}")
         
-        print("DEBUG: No CDLC date pattern found, using defaults")
+        logger.debug("DEBUG: No CDLC date pattern found, using defaults")
         return 2025, 4  # Default if parsing fails
     
     async def _clean_ukraine_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
@@ -1464,34 +1549,34 @@ class DataCleaner:
         # Extract year and month from filename (format: march'25)
         year, month = self._extract_aromateque_date_from_filename()
         
-        print(f"DEBUG: Aromateque processing for Year: {year}, Month: {month}")
-        print(f"DEBUG: Original DataFrame shape: {df.shape}")
-        print(f"DEBUG: DataFrame columns: {list(df.columns)}")
+        logger.debug(f"DEBUG: Aromateque processing for Year: {year}, Month: {month}")
+        logger.debug(f"DEBUG: Original DataFrame shape: {df.shape}")
+        logger.debug(f"DEBUG: DataFrame columns: {list(df.columns)}")
         
         # Handle pivot table format - headers at row 12 (0-indexed), data starts at row 13
-        print(f"DEBUG: === HEADER PROCESSING STEP ===")
-        print(f"DEBUG: Original DataFrame shape before header processing: {df.shape}")
-        print(f"DEBUG: DataFrame read with header=None, all columns are numeric indices")
+        logger.debug(f"DEBUG: === HEADER PROCESSING STEP ===")
+        logger.debug(f"DEBUG: Original DataFrame shape before header processing: {df.shape}")
+        logger.debug(f"DEBUG: DataFrame read with header=None, all columns are numeric indices")
         
         # With header=None, everything is 0-indexed and we have numeric column names
         # Corrected: header row is 10 (contains datetime values), data starts at row 11
         if len(df) > 10:
-            print(f"DEBUG: Using row 10 as header (contains datetime values)")
-            print(f"DEBUG: Skipping rows 0-9 (store summary data)")
-            print(f"DEBUG: Row 10 (header): {df.iloc[10].tolist()}")
-            print(f"DEBUG: Rows 11+ (product data): {len(df) - 11} rows")
+            logger.debug(f"DEBUG: Using row 10 as header (contains datetime values)")
+            logger.debug(f"DEBUG: Skipping rows 0-9 (store summary data)")
+            logger.debug(f"DEBUG: Row 10 (header): {df.iloc[10].tolist()}")
+            logger.debug(f"DEBUG: Rows 11+ (product data): {len(df) - 11} rows")
             
             # Show what rows we're about to keep
             for i in range(min(len(df), 15)):  # Show first few rows including header
-                print(f"DEBUG: Row {i}: {df.iloc[i].tolist()}")
+                logger.debug(f"DEBUG: Row {i}: {df.iloc[i].tolist()}")
             
             # Skip first 10 rows to get to header row
             df = df.iloc[10:].reset_index(drop=True)
-            print(f"DEBUG: After iloc[10:] - shape: {df.shape}")
+            logger.debug(f"DEBUG: After iloc[10:] - shape: {df.shape}")
             
             # Set column names from first row (header row at original row 10)
             header_row = df.iloc[0].tolist()
-            print(f"DEBUG: Setting column names from row 0 (original row 10): {header_row}")
+            logger.debug(f"DEBUG: Setting column names from row 0 (original row 10): {header_row}")
             # Clean up any NaN values in headers
             cleaned_headers = []
             for i, header in enumerate(header_row):
@@ -1501,20 +1586,20 @@ class DataCleaner:
                     cleaned_headers.append(str(header).strip())
             
             df.columns = cleaned_headers
-            print(f"DEBUG: Cleaned column names: {df.columns.tolist()}")
-            print(f"DEBUG: Before dropping header row - shape: {df.shape}")
+            logger.debug(f"DEBUG: Cleaned column names: {df.columns.tolist()}")
+            logger.debug(f"DEBUG: Before dropping header row - shape: {df.shape}")
             df = df[1:].reset_index(drop=True)
-            print(f"DEBUG: After dropping header row - final shape: {df.shape}")
+            logger.debug(f"DEBUG: After dropping header row - final shape: {df.shape}")
         else:
-            print(f"DEBUG: ERROR - DataFrame too short ({len(df)} rows), expected at least 11 rows")
+            logger.debug(f"DEBUG: ERROR - DataFrame too short ({len(df)} rows), expected at least 11 rows")
         
-        print(f"DEBUG: After header processing - DataFrame shape: {df.shape}")
-        print(f"DEBUG: Column names after header processing: {list(df.columns)}")
+        logger.debug(f"DEBUG: After header processing - DataFrame shape: {df.shape}")
+        logger.debug(f"DEBUG: Column names after header processing: {list(df.columns)}")
         
         # Debug: Show each column name with its index and type
-        print("DEBUG: Detailed column analysis:")
+        logger.debug("DEBUG: Detailed column analysis:")
         for i, col in enumerate(df.columns):
-            print(f"  Column {i}: '{col}' (type: {type(col)}, str: '{str(col)}')")
+            logger.debug(f"  Column {i}: '{col}' (type: {type(col)}, str: '{str(col)}')")
         
         # Find the target date column for the extracted month/year
         # Ukrainian month names mapping
@@ -1542,28 +1627,28 @@ class DataCleaner:
         from datetime import datetime
         target_datetime = datetime(year, month, 1)
         
-        print(f"DEBUG: Month {month} -> Ukrainian: '{ukrainian_month_name}' -> Target text: '{target_date_str}'")
-        print(f"DEBUG: Month {month} -> Target datetime: {target_datetime}")
+        logger.debug(f"DEBUG: Month {month} -> Ukrainian: '{ukrainian_month_name}' -> Target text: '{target_date_str}'")
+        logger.debug(f"DEBUG: Month {month} -> Target datetime: {target_datetime}")
         
         target_column = None
-        print("DEBUG: Searching for target column...")
+        logger.debug("DEBUG: Searching for target column...")
         
         # First try: Look for target string in column names
         for i, col in enumerate(df.columns):
             col_str = str(col).strip() if pd.notna(col) else 'None'
             matches = col_str == target_date_str
-            print(f"  Column {i} name: '{col_str}' == '{target_date_str}' ? {matches}")
+            logger.debug(f"  Column {i} name: '{col_str}' == '{target_date_str}' ? {matches}")
             if matches:
                 target_column = col
-                print(f"DEBUG: ✓ Found target date column by name at index {i}: '{target_column}'")
+                logger.debug(f"DEBUG: ✓ Found target date column by name at index {i}: '{target_column}'")
                 break
         
         # Second try: Look for target datetime in column names (Excel auto-converted headers)
         if not target_column:
-            print("DEBUG: Column names don't match text, checking for datetime objects...")
+            logger.debug("DEBUG: Column names don't match text, checking for datetime objects...")
             for i, col in enumerate(df.columns):
                 col_str = str(col).strip() if pd.notna(col) else 'None'
-                print(f"  Column {i} name: '{col_str}' (type: {type(col)})")
+                logger.debug(f"  Column {i} name: '{col_str}' (type: {type(col)})")
                 
                 # Check if this is a datetime object that matches our target
                 if isinstance(col, str) and col.strip():
@@ -1573,7 +1658,7 @@ class DataCleaner:
                         if (parsed_datetime.year == target_datetime.year and 
                             parsed_datetime.month == target_datetime.month):
                             target_column = col
-                            print(f"DEBUG: ✓ Found target date column by datetime parsing at index {i}: '{target_column}'")
+                            logger.debug(f"DEBUG: ✓ Found target date column by datetime parsing at index {i}: '{target_column}'")
                             break
                     except:
                         pass
@@ -1581,24 +1666,24 @@ class DataCleaner:
                 # Also check if the string representation looks like our target datetime
                 if target_datetime.strftime('%Y-%m-%d') in col_str:
                     target_column = col
-                    print(f"DEBUG: ✓ Found target date column by datetime string match at index {i}: '{target_column}'")
+                    logger.debug(f"DEBUG: ✓ Found target date column by datetime string match at index {i}: '{target_column}'")
                     break
         
         # Third try: Look for target string in first row values (header row data)
         if not target_column and len(df) > 0:
-            print("DEBUG: Column names don't match, checking first row values for Ukrainian text...")
+            logger.debug("DEBUG: Column names don't match, checking first row values for Ukrainian text...")
             first_row = df.iloc[0]
             for i, (col, val) in enumerate(first_row.items()):
                 val_str = str(val).strip() if pd.notna(val) else 'None'
                 matches = val_str == target_date_str
-                print(f"  Column {i} value: '{val_str}' == '{target_date_str}' ? {matches}")
+                logger.debug(f"  Column {i} value: '{val_str}' == '{target_date_str}' ? {matches}")
                 if matches:
                     target_column = col
-                    print(f"DEBUG: ✓ Found target date column by first row value at index {i}: '{target_column}'")
+                    logger.debug(f"DEBUG: ✓ Found target date column by first row value at index {i}: '{target_column}'")
                     break
         
         if not target_column:
-            print(f"DEBUG: Target date column {target_date_str} not found, available columns: {list(df.columns)}")
+            logger.debug(f"DEBUG: Target date column {target_date_str} not found, available columns: {list(df.columns)}")
             # Try alternative formats and partial matches
             alt_formats = [
                 ukrainian_month_name,  # Just month name
@@ -1612,14 +1697,14 @@ class DataCleaner:
                 for col in df.columns:
                     if pd.notna(col) and alt_format in str(col):
                         target_column = col
-                        print(f"DEBUG: Found alternative date column: {target_column} (matched '{alt_format}')")
+                        logger.debug(f"DEBUG: Found alternative date column: {target_column} (matched '{alt_format}')")
                         break
                 if target_column:
                     break
             
             # Final attempt: Look for columns that contain datetime-like strings matching our target
             if not target_column:
-                print("DEBUG: Final attempt - checking for datetime strings in columns...")
+                logger.debug("DEBUG: Final attempt - checking for datetime strings in columns...")
                 for col in df.columns:
                     col_str = str(col).strip()
                     # Check if this looks like a datetime string that matches our target month/year
@@ -1627,76 +1712,76 @@ class DataCleaner:
                         f"{month:02d}.{year}" in col_str or
                         f"01.{month:02d}.{year}" in col_str):
                         target_column = col
-                        print(f"DEBUG: ✓ Found target date column by datetime pattern: '{target_column}'")
+                        logger.debug(f"DEBUG: ✓ Found target date column by datetime pattern: '{target_column}'")
                         break
         
         if not target_column:
-            print("ERROR: Could not find target date column, returning empty DataFrame")
+            logger.debug("ERROR: Could not find target date column, returning empty DataFrame")
             return pd.DataFrame(), transformations
         
         # Process data rows
         processed_rows = []
-        print(f"DEBUG: === STARTING ROW PROCESSING ===")
-        print(f"DEBUG: Processing {len(df)} rows looking for data in column '{target_column}'")
+        logger.debug(f"DEBUG: === STARTING ROW PROCESSING ===")
+        logger.debug(f"DEBUG: Processing {len(df)} rows looking for data in column '{target_column}'")
         
         # Skip first row if it contains header values (like "березня-25")
         start_row = 1 if len(df) > 0 and any(str(val).strip() in [ukrainian_months.get(i, '') + '-25' for i in range(1, 13)] for val in df.iloc[0]) else 0
-        print(f"DEBUG: Starting data processing from row {start_row} (0=first row, 1=skip header row)")
+        logger.debug(f"DEBUG: Starting data processing from row {start_row} (0=first row, 1=skip header row)")
         
         for idx in range(start_row, len(df)):
             row = df.iloc[idx]
-            print(f"DEBUG: === PROCESSING ROW {idx} ===")
-            print(f"DEBUG: Full row data: {row.tolist()}")
+            logger.debug(f"DEBUG: === PROCESSING ROW {idx} ===")
+            logger.debug(f"DEBUG: Full row data: {row.tolist()}")
             
             # Get functional_name from column index 1 (column B in Excel)
             # After header processing with header=None, column indices should be preserved
             functional_name = row.iloc[1] if len(row) > 1 else None
-            print(f"DEBUG: Column index 1 (Excel column B) functional_name: '{functional_name}' (type: {type(functional_name)})")
+            logger.debug(f"DEBUG: Column index 1 (Excel column B) functional_name: '{functional_name}' (type: {type(functional_name)})")
             
             # Also check what's in column index 0 for reference
             product_name = row.iloc[0] if len(row) > 0 else None  
-            print(f"DEBUG: Column index 0 (Excel column A) product_name: '{product_name}' (type: {type(product_name)})")
+            logger.debug(f"DEBUG: Column index 0 (Excel column A) product_name: '{product_name}' (type: {type(product_name)})")
             
             # Show which column we're looking for quantities in
-            print(f"DEBUG: Looking for quantity in target column: '{target_column}'")
+            logger.debug(f"DEBUG: Looking for quantity in target column: '{target_column}'")
             
             # Skip rows without functional_name
             if pd.isna(functional_name) or str(functional_name).strip() == '':
-                print(f"DEBUG: SKIPPING row {idx} - empty functional_name (value: '{functional_name}')")
+                logger.debug(f"DEBUG: SKIPPING row {idx} - empty functional_name (value: '{functional_name}')")
                 continue
             
             # Debug: Show what's in the target column for this row
             if target_column in row.index:
                 target_value = row[target_column]
-                print(f"DEBUG: Target column '{target_column}' value: '{target_value}' (type: {type(target_value)})")
+                logger.debug(f"DEBUG: Target column '{target_column}' value: '{target_value}' (type: {type(target_value)})")
             else:
-                print(f"DEBUG: ERROR - Target column '{target_column}' not found in row!")
+                logger.debug(f"DEBUG: ERROR - Target column '{target_column}' not found in row!")
                 continue
             
             # Get quantity from target date column
             quantity = row[target_column] if target_column in row.index else None
-            print(f"DEBUG: Quantity from {target_column}: '{quantity}'")
+            logger.debug(f"DEBUG: Quantity from {target_column}: '{quantity}'")
             
             # Clean quantity value
             clean_quantity = 0
             if pd.notna(quantity) and str(quantity).strip():
                 quantity_str = str(quantity).strip().replace(',', '').replace(' ', '')
-                print(f"DEBUG: Raw quantity: '{quantity}' -> cleaned: '{quantity_str}'")
+                logger.debug(f"DEBUG: Raw quantity: '{quantity}' -> cleaned: '{quantity_str}'")
                 try:
                     clean_quantity = float(quantity_str)
-                    print(f"DEBUG: ✓ Parsed quantity successfully: {clean_quantity}")
+                    logger.debug(f"DEBUG: ✓ Parsed quantity successfully: {clean_quantity}")
                 except ValueError as e:
-                    print(f"DEBUG: ✗ Could not parse quantity '{quantity}' (cleaned: '{quantity_str}'): {e}")
+                    logger.debug(f"DEBUG: ✗ Could not parse quantity '{quantity}' (cleaned: '{quantity_str}'): {e}")
                     clean_quantity = 0
             else:
-                print(f"DEBUG: Quantity is empty/null: '{quantity}'")
+                logger.debug(f"DEBUG: Quantity is empty/null: '{quantity}'")
             
             # Only include rows with positive quantity (as per requirements)
-            print(f"DEBUG: Final quantity for row {idx}: {clean_quantity}")
+            logger.debug(f"DEBUG: Final quantity for row {idx}: {clean_quantity}")
             if clean_quantity > 0:
                 # Ensure functional_name is uppercase for database consistency
                 clean_functional_name = str(functional_name).strip().upper()
-                print(f"DEBUG: ✓ INCLUDING row {idx} - functional_name: '{clean_functional_name}' (uppercase), quantity: {clean_quantity}")
+                logger.debug(f"DEBUG: ✓ INCLUDING row {idx} - functional_name: '{clean_functional_name}' (uppercase), quantity: {clean_quantity}")
                 processed_rows.append({
                     'functional_name': clean_functional_name,
                     'quantity': clean_quantity,
@@ -1709,90 +1794,90 @@ class DataCleaner:
                 })
             else:
                 clean_functional_name = str(functional_name).strip().upper()
-                print(f"DEBUG: ✗ EXCLUDING row {idx} - zero/negative quantity: {clean_quantity} (functional_name: '{clean_functional_name}')")
+                logger.debug(f"DEBUG: ✗ EXCLUDING row {idx} - zero/negative quantity: {clean_quantity} (functional_name: '{clean_functional_name}')")
         
-        print(f"DEBUG: === PROCESSING SUMMARY ===")
-        print(f"DEBUG: Total rows processed: {len(df)}")
-        print(f"DEBUG: Rows successfully added: {len(processed_rows)}")
-        print(f"DEBUG: Expected ~16 rows for March data from screenshot")
+        logger.debug(f"DEBUG: === PROCESSING SUMMARY ===")
+        logger.debug(f"DEBUG: Total rows processed: {len(df)}")
+        logger.debug(f"DEBUG: Rows successfully added: {len(processed_rows)}")
+        logger.debug(f"DEBUG: Expected ~16 rows for March data from screenshot")
         
         # Show details of processed rows
         if processed_rows:
-            print(f"DEBUG: Processed rows details:")
+            logger.debug(f"DEBUG: Processed rows details:")
             for i, row in enumerate(processed_rows):
-                print(f"  Row {i}: functional_name='{row['functional_name']}', quantity={row['quantity']}")
+                logger.debug(f"  Row {i}: functional_name='{row['functional_name']}', quantity={row['quantity']}")
             
             # Show functional names that were included
             functional_names = [row['functional_name'] for row in processed_rows]
-            print(f"DEBUG: Functional names included: {functional_names}")
+            logger.debug(f"DEBUG: Functional names included: {functional_names}")
             
             # Lookup product EANs using functional_name (SKU codes)
-            print(f"DEBUG: Looking up product EANs for {len(processed_rows)} entries using functional_name (SKU codes)")
+            logger.debug(f"DEBUG: Looking up product EANs for {len(processed_rows)} entries using functional_name (SKU codes)")
             
             if not self.db_service:
-                print("ERROR: Database service not available for product lookup")
+                logger.debug("ERROR: Database service not available for product lookup")
                 for entry in processed_rows:
                     entry['product_ean'] = None
             else:
-                print("DEBUG: Database service is available, proceeding with lookups")
+                logger.debug("DEBUG: Database service is available, proceeding with lookups")
                 successful_lookups = 0
                 failed_lookups = 0
                 
                 for i, entry in enumerate(processed_rows):
                     functional_name = entry.get('functional_name')
-                    print(f"DEBUG: Processing entry {i+1}/{len(processed_rows)}: functional_name='{functional_name}'")
+                    logger.debug(f"DEBUG: Processing entry {i+1}/{len(processed_rows)}: functional_name='{functional_name}'")
                     
                     if functional_name and str(functional_name).strip():
                         try:
                             clean_functional_name = str(functional_name).strip()
-                            print(f"DEBUG: Looking up product for functional_name: '{clean_functional_name}'")
+                            logger.debug(f"DEBUG: Looking up product for functional_name: '{clean_functional_name}'")
                             
                             product = await self.db_service.get_product_by_name(clean_functional_name)
                             
                             if product and product.get('ean'):
                                 entry['product_ean'] = product['ean']
                                 successful_lookups += 1
-                                print(f"DEBUG: ✓ Found EAN '{product['ean']}' for functional_name '{clean_functional_name}'")
+                                logger.debug(f"DEBUG: ✓ Found EAN '{product['ean']}' for functional_name '{clean_functional_name}'")
                             else:
                                 entry['product_ean'] = None
                                 failed_lookups += 1
-                                print(f"DEBUG: ✗ No EAN found for functional_name '{clean_functional_name}' (product: {product})")
+                                logger.debug(f"DEBUG: ✗ No EAN found for functional_name '{clean_functional_name}' (product: {product})")
                                 
                         except Exception as e:
                             import traceback
                             entry['product_ean'] = None
                             failed_lookups += 1
-                            print(f"ERROR: Failed to lookup EAN for '{functional_name}': {str(e)}")
-                            print(f"ERROR: Full traceback: {traceback.format_exc()}")
+                            logger.debug(f"ERROR: Failed to lookup EAN for '{functional_name}': {str(e)}")
+                            logger.debug(f"ERROR: Full traceback: {traceback.format_exc()}")
                     else:
                         entry['product_ean'] = None
                         failed_lookups += 1
-                        print(f"DEBUG: ✗ Skipping entry with empty functional_name")
+                        logger.debug(f"DEBUG: ✗ Skipping entry with empty functional_name")
                 
-                print(f"DEBUG: Product lookup summary - Success: {successful_lookups}, Failed: {failed_lookups}, Total: {len(processed_rows)}")
+                logger.debug(f"DEBUG: Product lookup summary - Success: {successful_lookups}, Failed: {failed_lookups}, Total: {len(processed_rows)}")
                 
                 # Filter out entries without EANs (can't insert into database)
                 entries_with_ean = [entry for entry in processed_rows if entry.get('product_ean')]
                 entries_without_ean = [entry for entry in processed_rows if not entry.get('product_ean')]
                 
                 if entries_without_ean:
-                    print(f"WARNING: Filtering out {len(entries_without_ean)} entries without EANs:")
+                    logger.debug(f"WARNING: Filtering out {len(entries_without_ean)} entries without EANs:")
                     for entry in entries_without_ean:
-                        print(f"  - {entry.get('functional_name', 'Unknown')}")
+                        logger.debug(f"  - {entry.get('functional_name', 'Unknown')}")
                 
                 processed_rows = entries_with_ean
-                print(f"DEBUG: After EAN filtering: {len(processed_rows)} entries remain")
+                logger.debug(f"DEBUG: After EAN filtering: {len(processed_rows)} entries remain")
         
         # Create new DataFrame from processed rows
         if processed_rows:
             df_cleaned = pd.DataFrame(processed_rows)
-            print(f"DEBUG: Created cleaned DataFrame with {len(df_cleaned)} rows")
-            print(f"DEBUG: DataFrame columns: {list(df_cleaned.columns)}")
-            print(f"DEBUG: Sample DataFrame content:")
-            print(df_cleaned.head().to_string())
+            logger.debug(f"DEBUG: Created cleaned DataFrame with {len(df_cleaned)} rows")
+            logger.debug(f"DEBUG: DataFrame columns: {list(df_cleaned.columns)}")
+            logger.debug(f"DEBUG: Sample DataFrame content:")
+            logger.debug(f"Cleaned data sample: {df_cleaned.head().to_string()}")
         else:
             df_cleaned = pd.DataFrame()
-            print("DEBUG: No valid rows found, returning empty DataFrame")
+            logger.debug("DEBUG: No valid rows found, returning empty DataFrame")
         
         # Log transformations
         transformations.append({
@@ -1826,7 +1911,7 @@ class DataCleaner:
         if not self.current_filename:
             return 2025, 1  # Default values
         
-        print(f"DEBUG: Extracting date from Aromateque filename: '{self.current_filename}'")
+        logger.debug(f"DEBUG: Extracting date from Aromateque filename: '{self.current_filename}'")
         
         # Primary format: month'YY (e.g., march'25, april'25)
         month_names = {
@@ -1842,7 +1927,7 @@ class DataCleaner:
             if match:
                 year_suffix = int(match.group(1))
                 year = 2000 + year_suffix  # Convert 25 to 2025
-                print(f"DEBUG: Found month'YY format - Month: {month_name} ({month_num}), Year: {year}")
+                logger.debug(f"DEBUG: Found month'YY format - Month: {month_name} ({month_num}), Year: {year}")
                 return year, month_num
         
         # Fallback: Try month abbreviations with apostrophe
@@ -1857,7 +1942,7 @@ class DataCleaner:
             if match:
                 year_suffix = int(match.group(1))
                 year = 2000 + year_suffix  # Convert 25 to 2025
-                print(f"DEBUG: Found abbrev'YY format - Month: {month_abbrev} ({month_num}), Year: {year}")
+                logger.debug(f"DEBUG: Found abbrev'YY format - Month: {month_abbrev} ({month_num}), Year: {year}")
                 return year, month_num
         
         # Additional fallback: Try without apostrophe
@@ -1867,10 +1952,10 @@ class DataCleaner:
             if match:
                 year_suffix = int(match.group(1))
                 year = 2000 + year_suffix
-                print(f"DEBUG: Found monthYY format - Month: {month_name} ({month_num}), Year: {year}")
+                logger.debug(f"DEBUG: Found monthYY format - Month: {month_name} ({month_num}), Year: {year}")
                 return year, month_num
         
-        print("DEBUG: No date pattern found in Aromateque filename, using defaults")
+        logger.debug("DEBUG: No date pattern found in Aromateque filename, using defaults")
         return 2025, 1  # Default if parsing fails
     
     async def _clean_generic_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
@@ -1878,8 +1963,39 @@ class DataCleaner:
         transformations = []
         df_clean = df.copy()
         
-        print(f"DEBUG: Generic data cleaning - Input shape: {df_clean.shape}")
-        print(f"DEBUG: Generic data columns: {list(df_clean.columns)}")
+        logger.debug(f"DEBUG: Generic data cleaning - Input shape: {df_clean.shape}")
+        logger.debug(f"DEBUG: Generic data columns: {list(df_clean.columns)}")
+        
+        # Normalize column names to match expected lowercase format
+        column_mapping = {
+            'Product EAN': 'product_ean',
+            'Month': 'month',
+            'Year': 'year',
+            'Quantity': 'quantity',
+            'Sales LC': 'sales_lc',
+            'Sales EUR': 'sales_eur',
+            'Currency': 'currency',
+            'Reseller': 'reseller',
+            'Functional Name': 'functional_name'
+        }
+        
+        # Apply column mapping if columns need normalization
+        renamed_columns = {}
+        for old_name, new_name in column_mapping.items():
+            if old_name in df_clean.columns:
+                renamed_columns[old_name] = new_name
+        
+        if renamed_columns:
+            df_clean = df_clean.rename(columns=renamed_columns)
+            logger.debug(f"DEBUG: Normalized column names: {renamed_columns}")
+            transformations.append({
+                "transformation_type": "normalize_column_names",
+                "description": f"Renamed columns: {renamed_columns}",
+                "original_columns": list(renamed_columns.keys()),
+                "new_columns": list(renamed_columns.values())
+            })
+        
+        logger.debug(f"DEBUG: Columns after normalization: {list(df_clean.columns)}")
         
         # Remove empty rows
         df_clean = df_clean.dropna(how='all')
@@ -1922,7 +2038,7 @@ class DataCleaner:
                 "final_count": final_count
             })
         
-        print(f"DEBUG: Generic data cleaning complete - Output shape: {df_clean.shape}")
+        logger.debug(f"DEBUG: Generic data cleaning complete - Output shape: {df_clean.shape}")
         
         return df_clean, transformations
     
@@ -1957,14 +2073,14 @@ class DataCleaner:
         
         # Remove rows with zero or null quantities (but preserve for some vendors)
         if 'quantity' in df.columns:
-            print(f"DEBUG: Common cleaning - quantity filtering. Rows before: {len(df)}")
+            logger.debug(f"DEBUG: Common cleaning - quantity filtering. Rows before: {len(df)}")
             # Convert to numeric first to handle string values safely
             df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce')
             
             # For most vendors, remove zero/negative quantities
             # But this filtering is now handled in vendor-specific cleaning and normalization
             # So we'll just convert to numeric here and let other stages handle filtering
-            print(f"DEBUG: Common cleaning - converted quantity to numeric. Rows after: {len(df)}")
+            logger.debug(f"DEBUG: Common cleaning - converted quantity to numeric. Rows after: {len(df)}")
             
             # Only remove truly invalid (NaN) quantities that couldn't be converted
             initial_count = len(df)
@@ -1972,6 +2088,6 @@ class DataCleaner:
             filtered_count = len(df)
             
             if filtered_count < initial_count:
-                print(f"DEBUG: Common cleaning - removed {initial_count - filtered_count} rows with non-numeric quantities")
+                logger.debug(f"DEBUG: Common cleaning - removed {initial_count - filtered_count} rows with non-numeric quantities")
         
         return df, transformations

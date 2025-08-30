@@ -13,7 +13,7 @@ class AuthService:
         self.logger = logging.getLogger(__name__)
         
         # Development mode - use mock authentication
-        if settings.environment == "development" or "placeholder" in settings.supabase_url:
+        if settings.environment == "development":
             self.logger.info("Running in development mode - using mock authentication")
             self.supabase = None
             self.admin_supabase = None
@@ -34,10 +34,25 @@ class AuthService:
             if self.dev_mode:
                 # Development mode - mock authentication
                 if credentials.email and credentials.password:
+                    # Special handling for test users to use real Supabase ID
+                    if credentials.email == "test@example.com":
+                        user_id = "548e4038-7dea-41cc-98e0-ffa0b651154a"  # Real Supabase user ID
+                    elif credentials.email == "test2@example.com":
+                        user_id = "f2fa5ab6-c2c7-40f5-a887-a2014ab7df81"  # Real Supabase user ID for test2
+                    elif credentials.email == "user@email.com":
+                        user_id = "fdd71f95-e8d4-417e-85aa-9b7b0c92436d"  # Real Supabase user ID for user@email.com
+                    else:
+                        # Create unique UUID based on email hash to prevent cross-user data exposure
+                        import hashlib
+                        # Create deterministic UUID from email hash
+                        hash_obj = hashlib.sha256(credentials.email.encode())
+                        hex_string = hash_obj.hexdigest()[:32]
+                        # Format as UUID: 8-4-4-4-12
+                        user_id = f"{hex_string[:8]}-{hex_string[8:12]}-{hex_string[12:16]}-{hex_string[16:20]}-{hex_string[20:32]}"
                     return TokenResponse(
                         access_token=f"dev_token_{credentials.email}",
                         user=UserResponse(
-                            id="dev_user_123",
+                            id=user_id,
                             email=credentials.email,
                             created_at="2025-01-01T00:00:00Z"
                         )
@@ -71,11 +86,25 @@ class AuthService:
     async def register(self, user_data: UserRegister) -> TokenResponse:
         try:
             if self.dev_mode:
-                # Development mode - mock registration
+                # Development mode - mock registration with unique user ID
+                # Special handling for test users to use real Supabase ID
+                if user_data.email == "test@example.com":
+                    user_id = "548e4038-7dea-41cc-98e0-ffa0b651154a"  # Real Supabase user ID
+                elif user_data.email == "test2@example.com":
+                    user_id = "f2fa5ab6-c2c7-40f5-a887-a2014ab7df81"  # Real Supabase user ID for test2
+                elif user_data.email == "user@email.com":
+                    user_id = "fdd71f95-e8d4-417e-85aa-9b7b0c92436d"  # Real Supabase user ID for user@email.com
+                else:
+                    import hashlib
+                    # Create deterministic UUID from email hash
+                    hash_obj = hashlib.sha256(user_data.email.encode())
+                    hex_string = hash_obj.hexdigest()[:32]
+                    # Format as UUID: 8-4-4-4-12
+                    user_id = f"{hex_string[:8]}-{hex_string[8:12]}-{hex_string[12:16]}-{hex_string[16:20]}-{hex_string[20:32]}"
                 return TokenResponse(
                     access_token="registration_successful",
                     user=UserResponse(
-                        id="dev_user_new",
+                        id=user_id,
                         email=user_data.email,
                         created_at="2025-01-01T00:00:00Z"
                     )
@@ -125,11 +154,17 @@ class AuthService:
                 self.logger.debug("Removed Bearer prefix from token")
             
             if self.dev_mode:
-                # Development mode - mock token verification
+                # Development mode - mock token verification with unique user ID
                 if token.startswith('dev_token_'):
                     email = token.replace('dev_token_', '')
+                    import hashlib
+                    # Create deterministic UUID from email hash
+                    hash_obj = hashlib.sha256(email.encode())
+                    hex_string = hash_obj.hexdigest()[:32]
+                    # Format as UUID: 8-4-4-4-12
+                    user_id = f"{hex_string[:8]}-{hex_string[8:12]}-{hex_string[12:16]}-{hex_string[16:20]}-{hex_string[20:32]}"
                     return {
-                        'id': 'dev_user_123',
+                        'id': user_id,
                         'email': email,
                         'created_at': '2025-01-01T00:00:00Z'
                     }
@@ -172,28 +207,25 @@ security = HTTPBearer()
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> UserInDB:
     """
-    FastAPI dependency to get the current authenticated user from JWT token
+    FastAPI dependency to get the current authenticated user from JWT token.
+    Enhanced with v1/v2 token support and client context.
     """
     try:
         # Extract token from credentials
         token = credentials.credentials
         
-        # Verify token using auth service
-        user_data = await auth_service.verify_token(token)
+        # Use migration wrapper for enhanced authentication
+        from app.services.auth_migration_wrapper import auth_migration_wrapper
+        user = await auth_migration_wrapper.get_current_user_compatible(token)
         
-        if not user_data:
+        if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid authentication credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
-        # Convert to UserInDB model
-        return UserInDB(
-            id=user_data["id"],
-            email=user_data["email"],
-            created_at=user_data.get("created_at")
-        )
+        return user
         
     except HTTPException:
         raise
