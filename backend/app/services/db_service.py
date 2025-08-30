@@ -192,7 +192,8 @@ class DatabaseService:
         
         if use_production_db:
             self.logger.info("Running DatabaseService in production database mode - using Supabase")
-            self.dev_mode = False
+            # Set dev_mode based on environment, not just database availability
+            self.dev_mode = use_development_mode
             # Create clients with proper API keys
             self.supabase: Client = create_client(
                 settings.supabase_url,
@@ -239,19 +240,8 @@ class DatabaseService:
     
     async def create_upload_record(self, upload_id: str, user_id: str, filename: str, file_size: int):
         try:
-            if self.dev_mode:
-                # Development mode - store in mock data
-                data = {
-                    "id": upload_id,
-                    "user_id": user_id,
-                    "filename": filename,
-                    "file_size": file_size,
-                    "status": UploadStatus.PENDING.value,
-                    "created_at": datetime.now().isoformat()
-                }
-                self.mock_uploads[upload_id] = data
-                self.logger.info(f"Created mock upload record: {upload_id}")
-                return data
+            # Always use Supabase for uploads, even in development mode
+            # This ensures data persistence and real database behavior
             
             # Production mode - use Supabase  
             # First, ensure the user record exists in public.users (unless in development)
@@ -339,16 +329,22 @@ class DatabaseService:
             if processing_time_ms is not None:
                 update_data["processing_time_ms"] = processing_time_ms
             
-            if self.dev_mode:
-                # Development mode - update mock data
-                if upload_id in self.mock_uploads:
-                    self.mock_uploads[upload_id].update(update_data)
-                    self.logger.info(f"Updated mock upload status: {upload_id} -> {status.value}")
-                return
+            # Always use Supabase for upload status updates to ensure data persistence
             
-            # Production mode - use user-scoped client to enforce RLS for data isolation
-            self.supabase.table("uploads").update(update_data).eq("id", upload_id).execute()
+            # Use service client in development to bypass RLS issues, user-scoped client in production
+            settings = get_settings()
+            is_development = settings.environment == "development"
+            
+            if is_development and hasattr(self, 'service_supabase'):
+                # Development: Use service client to bypass RLS
+                self.service_supabase.table("uploads").update(update_data).eq("id", upload_id).execute()
+                self.logger.info(f"Updated upload status (dev): {upload_id} -> {status.value}")
+            else:
+                # Production: Use user-scoped client with RLS
+                self.supabase.table("uploads").update(update_data).eq("id", upload_id).execute()
+                self.logger.info(f"Updated upload status (prod): {upload_id} -> {status.value}")
         except Exception as e:
+            self.logger.error(f"Failed to update upload status: {str(e)}")
             raise DatabaseException(f"Failed to update upload status: {str(e)}")
     
     async def get_upload_status(self, upload_id: str, user_id: str) -> Optional[ProcessingStatus]:
@@ -804,14 +800,8 @@ class DatabaseService:
             
             self.logger.info(f"📊 DB Service: get_user_uploads for user {user_id[:8]}..., development mode: {is_development}")
             
-            if is_development and hasattr(self, 'mock_uploads') and self.mock_uploads:
-                # Development mode - return mock uploads for this user
-                user_uploads = [upload for upload in self.mock_uploads.values() if upload["user_id"] == user_id]
-                # Sort by uploaded_at descending (uploads table uses uploaded_at, not created_at)
-                user_uploads.sort(key=lambda x: x.get("uploaded_at", ""), reverse=True)
-                self.logger.info(f"📊 DB Service: Found {len(user_uploads)} mock uploads for user")
-                return user_uploads
-            elif hasattr(self, 'supabase') and self.supabase:
+            # Always use Supabase for uploads data to ensure persistence
+            if hasattr(self, 'supabase') and self.supabase:
                 # Try user-scoped client first, then fall back to service client for development
                 try:
                     result = self.supabase.table("uploads").select("*").order("uploaded_at", desc=True).execute()

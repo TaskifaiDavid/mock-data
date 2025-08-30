@@ -816,6 +816,8 @@ const AnalyticsDashboard = () => {
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
               className="sidebar-toggle-btn"
               title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-expanded={!sidebarCollapsed}
             >
               {sidebarCollapsed ? '→' : '←'}
             </button>
@@ -870,8 +872,9 @@ const AnalyticsDashboard = () => {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="search-input"
+                aria-label="Search dashboards"
               />
-              <span className="search-icon">🔍</span>
+              <span className="search-icon" aria-hidden="true">🔍</span>
             </div>
             
             <div className="filter-controls">
@@ -951,6 +954,15 @@ const AnalyticsDashboard = () => {
                   onDragStart={(e) => handleDragStart(e, index)}
                   onDragOver={(e) => handleDragOver(e, index)}
                   onDragEnd={handleDragEnd}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setActiveDashboard(dashboard);
+                    }
+                  }}
+                  aria-label={`Select ${dashboard.dashboardName} dashboard${dashboard.isActive ? ' (active)' : ' (inactive)'}`}
                 >
                   <div className="dashboard-card-header">
                     <div className="card-title-section">
@@ -969,8 +981,9 @@ const AnalyticsDashboard = () => {
                             setSelectedDashboards(newSelection)
                           }}
                           className="card-checkbox"
+                          aria-label={`Select ${dashboard.dashboardName} for bulk actions`}
                         />
-                        <span className="drag-handle" title="Drag to reorder">⋮⋮</span>
+                        <span className="drag-handle" title="Drag to reorder" aria-label="Drag handle to reorder dashboard">⋮⋮</span>
                         {!sidebarCollapsed && <h4>{dashboard.dashboardName}</h4>}
                         {sidebarCollapsed && (
                           <h4 className="dashboard-name-collapsed" title={dashboard.dashboardName}>
@@ -1085,6 +1098,7 @@ const AnalyticsDashboard = () => {
                     onClick={handleCustomFullscreen}
                     className="viewer-action-btn"
                     title={isCustomFullscreen ? "Exit fullscreen mode (ESC)" : "View dashboard in fullscreen mode (ESC to exit)"}
+                    aria-label={isCustomFullscreen ? "Exit fullscreen mode" : "Enter fullscreen mode"}
                   >
                     {isCustomFullscreen ? '⛶ Exit Fullscreen' : '⛶ Fullscreen'}
                   </button>
