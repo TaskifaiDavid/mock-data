@@ -5,6 +5,13 @@ function StatusList() {
   const [uploads, setUploads] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [filters, setFilters] = useState({
+    status: [],
+    rows_processed: [],
+    rows_cleaned: []
+  })
+  const [openDropdown, setOpenDropdown] = useState(null)
 
   useEffect(() => {
     fetchUploads()
@@ -76,32 +83,212 @@ function StatusList() {
     return `${(ms / 1000).toFixed(2)}s`
   }
 
+  // Get unique values for each filterable column
+  const getUniqueValues = (key) => {
+    const values = uploads.map(upload => {
+      if (key === 'rows_processed' || key === 'rows_cleaned') {
+        return upload[key] || '-'
+      }
+      return upload[key]
+    })
+    return [...new Set(values)].sort()
+  }
+
+  // Handle filter toggle
+  const toggleFilter = (column, value) => {
+    setFilters(prev => {
+      const currentFilters = prev[column]
+      const newFilters = currentFilters.includes(value)
+        ? currentFilters.filter(v => v !== value)
+        : [...currentFilters, value]
+      return { ...prev, [column]: newFilters }
+    })
+  }
+
+  // Clear all filters
+  const clearAllFilters = () => {
+    setFilters({
+      status: [],
+      rows_processed: [],
+      rows_cleaned: []
+    })
+    setSearchTerm('')
+  }
+
+  // Apply filters
+  const filteredUploads = uploads.filter(upload => {
+    // Search filter
+    if (searchTerm && !upload.filename.toLowerCase().includes(searchTerm.toLowerCase())) {
+      return false
+    }
+
+    // Status filter
+    if (filters.status.length > 0 && !filters.status.includes(upload.status)) {
+      return false
+    }
+
+    // Rows processed filter
+    if (filters.rows_processed.length > 0) {
+      const value = upload.rows_processed || '-'
+      if (!filters.rows_processed.includes(value)) {
+        return false
+      }
+    }
+
+    // Rows cleaned filter
+    if (filters.rows_cleaned.length > 0) {
+      const value = upload.rows_cleaned || '-'
+      if (!filters.rows_cleaned.includes(value)) {
+        return false
+      }
+    }
+
+    return true
+  })
+
+  // Check if any filters are active
+  const hasActiveFilters = searchTerm ||
+    filters.status.length > 0 ||
+    filters.rows_processed.length > 0 ||
+    filters.rows_cleaned.length > 0
+
   return (
     <div className="status-list">
       <h2>Processing Status</h2>
-      
+
       {error && (
         <div className="error">Error loading uploads: {error}</div>
       )}
-      
+
       {uploads.length === 0 ? (
         <p className="no-uploads">No uploads yet. Upload a file to get started!</p>
       ) : (
-        <div className="status-table-container">
+        <>
+          <div className="filter-controls">
+            <div className="search-bar">
+              <input
+                type="text"
+                placeholder="Search by filename..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="search-input"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="clear-search"
+                  title="Clear search"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+            {hasActiveFilters && (
+              <button onClick={clearAllFilters} className="clear-all-filters">
+                Clear All Filters
+              </button>
+            )}
+          </div>
+
+          {filteredUploads.length === 0 ? (
+            <p className="no-uploads">No files found matching "{searchTerm}"</p>
+          ) : (
+            <div className="status-table-container">
           <table className="status-table">
             <thead>
               <tr>
                 <th>File Name</th>
-                <th>Status</th>
+                <th className="filterable-column">
+                  <div className="column-header">
+                    <span>Status</span>
+                    <button
+                      className={`filter-icon ${filters.status.length > 0 ? 'active' : ''}`}
+                      onClick={() => setOpenDropdown(openDropdown === 'status' ? null : 'status')}
+                      title="Filter status"
+                    >
+                      ⋮
+                    </button>
+                    {openDropdown === 'status' && (
+                      <div className="filter-dropdown">
+                        <div className="filter-options">
+                          {getUniqueValues('status').map(value => (
+                            <label key={value} className="filter-option">
+                              <input
+                                type="checkbox"
+                                checked={filters.status.includes(value)}
+                                onChange={() => toggleFilter('status', value)}
+                              />
+                              <span>{value}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </th>
                 <th>Uploaded</th>
-                <th>Rows Processed</th>
-                <th>Rows Cleaned</th>
+                <th className="filterable-column">
+                  <div className="column-header">
+                    <span>Rows Processed</span>
+                    <button
+                      className={`filter-icon ${filters.rows_processed.length > 0 ? 'active' : ''}`}
+                      onClick={() => setOpenDropdown(openDropdown === 'rows_processed' ? null : 'rows_processed')}
+                      title="Filter rows processed"
+                    >
+                      ⋮
+                    </button>
+                    {openDropdown === 'rows_processed' && (
+                      <div className="filter-dropdown">
+                        <div className="filter-options">
+                          {getUniqueValues('rows_processed').map(value => (
+                            <label key={value} className="filter-option">
+                              <input
+                                type="checkbox"
+                                checked={filters.rows_processed.includes(value)}
+                                onChange={() => toggleFilter('rows_processed', value)}
+                              />
+                              <span>{value}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </th>
+                <th className="filterable-column">
+                  <div className="column-header">
+                    <span>Rows Cleaned</span>
+                    <button
+                      className={`filter-icon ${filters.rows_cleaned.length > 0 ? 'active' : ''}`}
+                      onClick={() => setOpenDropdown(openDropdown === 'rows_cleaned' ? null : 'rows_cleaned')}
+                      title="Filter rows cleaned"
+                    >
+                      ⋮
+                    </button>
+                    {openDropdown === 'rows_cleaned' && (
+                      <div className="filter-dropdown">
+                        <div className="filter-options">
+                          {getUniqueValues('rows_cleaned').map(value => (
+                            <label key={value} className="filter-option">
+                              <input
+                                type="checkbox"
+                                checked={filters.rows_cleaned.includes(value)}
+                                onChange={() => toggleFilter('rows_cleaned', value)}
+                              />
+                              <span>{value}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </th>
                 <th>Processing Time</th>
                 <th>Error</th>
               </tr>
             </thead>
             <tbody>
-              {uploads.map((upload) => (
+              {filteredUploads.map((upload) => (
                 <tr key={upload.id}>
                   <td className="filename">{upload.filename}</td>
                   <td>
@@ -127,6 +314,8 @@ function StatusList() {
             </tbody>
           </table>
         </div>
+          )}
+        </>
       )}
     </div>
   )
