@@ -276,6 +276,7 @@ Technical details: {error_str}"""
             date_components = self._extract_date_components(user_message)
             month_filter = date_components.get('month')
             quarter_filter = date_components.get('quarter')
+            years_filter = date_components.get('years', [])
             
             # Build query with optional filtering
             if user_id:
@@ -300,21 +301,26 @@ Technical details: {error_str}"""
                     return []
                 
                 # Add date filters if detected
-                if year_filter:
+                # Support multi-year filtering (e.g., "2024 and 2025")
+                if years_filter and len(years_filter) > 1:
+                    query = query.in_("year", years_filter)
+                    if self.debug_mode:
+                        logger.info(f"📅 Applied multi-year filter: {years_filter}")
+                elif year_filter:
                     query = query.eq("year", year_filter)
                     if self.debug_mode:
-                        logger.info(f"📅 Applied year filter: {year_filter}")
-                
+                        logger.info(f"📅 Applied single year filter: {year_filter}")
+
                 if month_filter:
                     query = query.eq("month", month_filter)
                     if self.debug_mode:
                         logger.info(f"📅 Applied month filter: {month_filter}")
-                
+
                 if quarter_filter:
                     # Convert quarter to months
                     quarter_months = {
                         1: [1, 2, 3],
-                        2: [4, 5, 6], 
+                        2: [4, 5, 6],
                         3: [7, 8, 9],
                         4: [10, 11, 12]
                     }
@@ -322,8 +328,8 @@ Technical details: {error_str}"""
                         query = query.in_("month", quarter_months[quarter_filter])
                         if self.debug_mode:
                             logger.info(f"📅 Applied quarter filter: Q{quarter_filter} (months {quarter_months[quarter_filter]})")
-                
-                result = query.order("created_at", desc=True).limit(500).execute()
+
+                result = query.order("created_at", desc=True).limit(5000).execute()
                 
                 if self.debug_mode:
                     logger.info(f"✅ Found {len(result.data) if result.data else 0} records for user {user_id} (year: {year_filter or 'all'})")
@@ -332,11 +338,16 @@ Technical details: {error_str}"""
                 query = self.db_service.supabase.table("mock_data")\
                     .select("functional_name, reseller, sales_eur, quantity, month, year, product_ean, currency")
                 
-                # Add date filters if detected  
-                if year_filter:
+                # Add date filters if detected
+                # Support multi-year filtering (e.g., "2024 and 2025")
+                if years_filter and len(years_filter) > 1:
+                    query = query.in_("year", years_filter)
+                    if self.debug_mode:
+                        logger.info(f"📅 Applied multi-year filter to fallback: {years_filter}")
+                elif year_filter:
                     query = query.eq("year", year_filter)
                     if self.debug_mode:
-                        logger.info(f"📅 Applied year filter to fallback query: {year_filter}")
+                        logger.info(f"📅 Applied single year filter to fallback: {year_filter}")
                 
                 if month_filter:
                     query = query.eq("month", month_filter)
@@ -356,8 +367,8 @@ Technical details: {error_str}"""
                         if self.debug_mode:
                             logger.info(f"📅 Applied quarter filter to fallback: Q{quarter_filter} (months {quarter_months[quarter_filter]})")
                 
-                result = query.order("created_at", desc=True).limit(500).execute()
-                
+                result = query.order("created_at", desc=True).limit(5000).execute()
+
                 if self.debug_mode:
                     logger.warning("⚠️ No user ID provided, using recent data fallback")
                     logger.info(f"📊 Found {len(result.data) if result.data else 0} total records (year: {year_filter or 'all'})")
@@ -522,9 +533,9 @@ Technical details: {error_str}"""
         """Extract date components (year, month, quarter) from user message"""
         import re
         from datetime import datetime
-        
-        result = {'year': None, 'month': None, 'quarter': None}
-        
+
+        result = {'year': None, 'years': [], 'month': None, 'quarter': None}
+
         # Month name to number mapping
         month_map = {
             'january': 1, 'jan': 1, 'february': 2, 'feb': 2, 'march': 3, 'mar': 3,
@@ -532,12 +543,13 @@ Technical details: {error_str}"""
             'august': 8, 'aug': 8, 'september': 9, 'sep': 9, 'sept': 9,
             'october': 10, 'oct': 10, 'november': 11, 'nov': 11, 'december': 12, 'dec': 12
         }
-        
-        # Look for 4-digit years (2020-2030)
+
+        # Look for 4-digit years (2020-2030) - capture ALL years mentioned
         year_pattern = r'\b(202[0-9])\b'
         year_matches = re.findall(year_pattern, user_message)
         if year_matches:
-            result['year'] = int(year_matches[0])
+            result['years'] = [int(y) for y in year_matches]
+            result['year'] = result['years'][0]  # Backward compatibility
         
         # Look for month names (case insensitive)
         message_lower = user_message.lower()
@@ -649,24 +661,31 @@ Technical details: {error_str}"""
         """Create comprehensive data analysis for the LLM based on intent - NO SAMPLE RECORDS"""
         if not data:
             return "No data available"
-        
+
         try:
             # Basic statistics
             total_sales_eur = sum(float(row.get('sales_eur', 0) or 0) for row in data)
             total_quantity = sum(int(row.get('quantity', 0) or 0) for row in data)
-            
+
             # Get unique entities
             products = set(row.get('functional_name') for row in data if row.get('functional_name'))
             resellers = set(row.get('reseller') for row in data if row.get('reseller'))
             currencies = set(row.get('currency') for row in data if row.get('currency'))
-            
+
             # Time analysis
             years = set(row.get('year') for row in data if row.get('year'))
             months = set(row.get('month') for row in data if row.get('month'))
-            
+
+            # Data completeness warning
+            data_completeness_note = ""
+            if len(data) >= 5000:
+                data_completeness_note = "\n⚠️ DATA LIMIT REACHED: Showing 5000 most recent records. Results may be incomplete if dataset is larger."
+            elif len(data) >= 4000:
+                data_completeness_note = "\n⚠️ APPROACHING DATA LIMIT: Showing 5000 most recent records. Dataset appears large."
+
             # Build comprehensive analysis
             summary = f"""
-            COMPLETE SALES DATA ANALYSIS ({len(data)} total records):
+            COMPLETE SALES DATA ANALYSIS ({len(data)} records analyzed):{data_completeness_note}
             - Total Sales (EUR): €{total_sales_eur:,.2f}
             - Total Quantity: {total_quantity:,} units
             - Unique Products: {len(products)} products
