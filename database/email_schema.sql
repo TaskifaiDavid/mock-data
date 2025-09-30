@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS public.dashboard_configs (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id uuid REFERENCES public.users(id) ON DELETE CASCADE,
   dashboard_name text NOT NULL,
-  dashboard_type text NOT NULL CHECK (dashboard_type IN ('tableau', 'powerbi', 'grafana', 'looker', 'metabase', 'custom')),
+  dashboard_type text NOT NULL CHECK (dashboard_type IN ('looker', 'google_analytics', 'tableau', 'power_bi', 'custom')),
   dashboard_url text NOT NULL,
   authentication_method text CHECK (authentication_method IN ('token', 'sso', 'basic', 'none')),
   authentication_config jsonb,

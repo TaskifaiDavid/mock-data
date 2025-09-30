@@ -79,41 +79,11 @@ async def get_dashboard_configs(
         logger.info(f"Getting dashboard configs for user {current_user.email}")
         
         from app.services.db_service import DatabaseService
-        
+
         # Initialize database service with user authentication
         db_service = DatabaseService()
-        
-        # Check if we're in development mode
-        if hasattr(db_service, 'dev_mode') and db_service.dev_mode:
-            logger.info("Using development mode for dashboard configs")
-            # In dev mode, use persistent global mock storage
-            from app.services.db_service import _mock_dashboard_configs
-            
-            # Get user's dashboards from mock storage
-            user_dashboards = []
-            for dashboard_id, dashboard in _mock_dashboard_configs.items():
-                if dashboard.get('user_id') == current_user.id:
-                    formatted_config = {
-                        "id": dashboard_id,
-                        "dashboardName": dashboard["dashboard_name"],
-                        "dashboardType": dashboard["dashboard_type"], 
-                        "dashboardUrl": dashboard["dashboard_url"],
-                        "authenticationMethod": dashboard.get("authentication_method", "none"),
-                        "authenticationConfig": dashboard.get("authentication_config", {}),
-                        "permissions": dashboard.get("permissions", []),
-                        "isActive": dashboard.get("is_active", True),
-                        "createdAt": dashboard.get("created_at"),
-                        "updatedAt": dashboard.get("updated_at")
-                    }
-                    user_dashboards.append(formatted_config)
-            
-            logger.info(f"Fetched {len(user_dashboards)} dashboard configs for user {current_user.email} (dev mode)")
-            return {
-                "configs": user_dashboards,
-                "total": len(user_dashboards)
-            }
-        
-        # Production mode - query Supabase database
+
+        # Always use Supabase database for dashboard configs (no dev mode override)
         try:
             # Use service key to bypass RLS in development mode with mock auth
             supabase_client = db_service.service_supabase if hasattr(db_service, 'service_supabase') else db_service.supabase
@@ -206,30 +176,20 @@ async def create_dashboard_config(
             "created_at": now.isoformat(),
             "updated_at": now.isoformat()
         }
-        
-        # Check if we're in development mode
-        if hasattr(db_service, 'dev_mode') and db_service.dev_mode:
-            logger.info("Using development mode for dashboard creation")
-            # In dev mode, use persistent global mock storage
-            from app.services.db_service import _mock_dashboard_configs
-            
-            # Store in mock storage
-            _mock_dashboard_configs[dashboard_id] = dashboard_data
-            logger.info(f"Created dashboard config {dashboard_id} for user {current_user.email} (dev mode)")
-        else:
-            # Production mode - insert into Supabase database
-            try:
-                # Use service key to bypass RLS in development mode with mock auth
-                supabase_client = db_service.service_supabase if hasattr(db_service, 'service_supabase') else db_service.supabase
-                result = supabase_client.table("dashboard_configs").insert(dashboard_data).execute()
-                
-                if not result.data:
-                    raise HTTPException(status_code=500, detail="Failed to create dashboard configuration")
-                
-                logger.info(f"Created dashboard config {dashboard_id} for user {current_user.email}")
-            except Exception as db_error:
-                logger.error(f"Database error creating dashboard: {str(db_error)}")
-                raise HTTPException(status_code=500, detail=f"Database error: {str(db_error)}")
+
+        # Always use Supabase database for dashboard configs (no dev mode override)
+        try:
+            # Use service key to bypass RLS in development mode with mock auth
+            supabase_client = db_service.service_supabase if hasattr(db_service, 'service_supabase') else db_service.supabase
+            result = supabase_client.table("dashboard_configs").insert(dashboard_data).execute()
+
+            if not result.data:
+                raise HTTPException(status_code=500, detail="Failed to create dashboard configuration")
+
+            logger.info(f"Created dashboard config {dashboard_id} for user {current_user.email}")
+        except Exception as db_error:
+            logger.error(f"Database error creating dashboard: {str(db_error)}")
+            raise HTTPException(status_code=500, detail=f"Database error: {str(db_error)}")
         
         # Return the created config
         created_config = {
@@ -305,37 +265,20 @@ async def update_dashboard_config(
             "is_active": config.isActive,
             "updated_at": now.isoformat()
         }
-        
-        # Check if we're in development mode
-        if hasattr(db_service, 'dev_mode') and db_service.dev_mode:
-            logger.info("Using development mode for dashboard update")
-            from app.services.db_service import _mock_dashboard_configs
-            
-            # Check if dashboard exists and belongs to user
-            if config_id not in _mock_dashboard_configs:
+
+        # Always use Supabase database for dashboard configs (no dev mode override)
+        try:
+            # Use service key to bypass RLS in development mode with mock auth
+            supabase_client = db_service.service_supabase if hasattr(db_service, 'service_supabase') else db_service.supabase
+            result = supabase_client.table("dashboard_configs").update(update_data).eq("id", config_id).eq("user_id", current_user.id).execute()
+
+            if not result.data:
                 raise HTTPException(status_code=404, detail="Dashboard configuration not found")
-            
-            existing_dashboard = _mock_dashboard_configs[config_id]
-            if existing_dashboard.get('user_id') != current_user.id:
-                raise HTTPException(status_code=403, detail="Access denied")
-            
-            # Update the dashboard
-            _mock_dashboard_configs[config_id].update(update_data)
-            logger.info(f"Updated dashboard config {config_id} for user {current_user.email} (dev mode)")
-        else:
-            # Production mode - update in Supabase database
-            try:
-                # Use service key to bypass RLS in development mode with mock auth
-                supabase_client = db_service.service_supabase if hasattr(db_service, 'service_supabase') else db_service.supabase
-                result = supabase_client.table("dashboard_configs").update(update_data).eq("id", config_id).eq("user_id", current_user.id).execute()
-                
-                if not result.data:
-                    raise HTTPException(status_code=404, detail="Dashboard configuration not found")
-                
-                logger.info(f"Updated dashboard config {config_id} for user {current_user.email}")
-            except Exception as db_error:
-                logger.error(f"Database error updating dashboard: {str(db_error)}")
-                raise HTTPException(status_code=500, detail=f"Database error: {str(db_error)}")
+
+            logger.info(f"Updated dashboard config {config_id} for user {current_user.email}")
+        except Exception as db_error:
+            logger.error(f"Database error updating dashboard: {str(db_error)}")
+            raise HTTPException(status_code=500, detail=f"Database error: {str(db_error)}")
         
         return {
             "success": True,
@@ -369,37 +312,20 @@ async def delete_dashboard_config(
         
         # Initialize database service
         db_service = DatabaseService()
-        
-        # Check if we're in development mode
-        if hasattr(db_service, 'dev_mode') and db_service.dev_mode:
-            logger.info("Using development mode for dashboard deletion")
-            from app.services.db_service import _mock_dashboard_configs
-            
-            # Check if dashboard exists and belongs to user
-            if config_id not in _mock_dashboard_configs:
+
+        # Always use Supabase database for dashboard configs (no dev mode override)
+        try:
+            # Use service key to bypass RLS in development mode with mock auth
+            supabase_client = db_service.service_supabase if hasattr(db_service, 'service_supabase') else db_service.supabase
+            result = supabase_client.table("dashboard_configs").delete().eq("id", config_id).eq("user_id", current_user.id).execute()
+
+            if not result.data:
                 raise HTTPException(status_code=404, detail="Dashboard configuration not found")
-            
-            existing_dashboard = _mock_dashboard_configs[config_id]
-            if existing_dashboard.get('user_id') != current_user.id:
-                raise HTTPException(status_code=403, detail="Access denied")
-            
-            # Delete the dashboard
-            del _mock_dashboard_configs[config_id]
-            logger.info(f"Deleted dashboard config {config_id} for user {current_user.email} (dev mode)")
-        else:
-            # Production mode - delete from Supabase database
-            try:
-                # Use service key to bypass RLS in development mode with mock auth
-                supabase_client = db_service.service_supabase if hasattr(db_service, 'service_supabase') else db_service.supabase
-                result = supabase_client.table("dashboard_configs").delete().eq("id", config_id).eq("user_id", current_user.id).execute()
-                
-                if not result.data:
-                    raise HTTPException(status_code=404, detail="Dashboard configuration not found")
-                
-                logger.info(f"Deleted dashboard config {config_id} for user {current_user.email}")
-            except Exception as db_error:
-                logger.error(f"Database error deleting dashboard: {str(db_error)}")
-                raise HTTPException(status_code=500, detail=f"Database error: {str(db_error)}")
+
+            logger.info(f"Deleted dashboard config {config_id} for user {current_user.email}")
+        except Exception as db_error:
+            logger.error(f"Database error deleting dashboard: {str(db_error)}")
+            raise HTTPException(status_code=500, detail=f"Database error: {str(db_error)}")
         
         return {
             "success": True,
