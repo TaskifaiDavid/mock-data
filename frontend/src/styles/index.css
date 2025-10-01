@@ -4075,6 +4075,19 @@ button {
   animation: fadeInFullscreen var(--duration-300) var(--ease-out);
 }
 
+/* Browser fullscreen styles using :fullscreen pseudo-class */
+.custom-fullscreen-overlay:fullscreen,
+.custom-fullscreen-overlay:-webkit-full-screen,
+.custom-fullscreen-overlay:-moz-full-screen,
+.custom-fullscreen-overlay:-ms-fullscreen {
+  width: 100vw;
+  height: 100vh;
+  max-width: 100vw;
+  max-height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+
 @keyframes fadeInFullscreen {
   from {
     opacity: 0;
@@ -4117,6 +4130,17 @@ button {
   border: none;
   border-radius: 0;
   min-height: 100vh;
+}
+
+/* Enhanced iframe styles in browser fullscreen */
+.custom-fullscreen-overlay:fullscreen .dashboard-iframe,
+.custom-fullscreen-overlay:-webkit-full-screen .dashboard-iframe,
+.custom-fullscreen-overlay:-moz-full-screen .dashboard-iframe,
+.custom-fullscreen-overlay:-ms-fullscreen .dashboard-iframe {
+  width: 100vw;
+  height: 100vh;
+  max-width: 100vw;
+  max-height: 100vh;
 }
 
 /* Remove any loading/error overlays in fullscreen */

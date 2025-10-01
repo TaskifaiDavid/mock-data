@@ -293,26 +293,31 @@ const AnalyticsDashboard = () => {
   // Refs for drag and drop
   const draggedItem = useRef(null)
   const dragOverItem = useRef(null)
+  const fullscreenOverlayRef = useRef(null)
 
   useEffect(() => {
     fetchDashboards()
-    
+
     // Online/offline detection
     const handleOnline = () => setIsOffline(false)
     const handleOffline = () => setIsOffline(true)
-    
+
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
-    
+
     // Fullscreen change detection
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement)
+      // If user exits fullscreen via ESC or browser button, update our state
+      if (!document.fullscreenElement && isCustomFullscreen) {
+        setIsCustomFullscreen(false)
+      }
     }
-    
+
     document.addEventListener('fullscreenchange', handleFullscreenChange)
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
     document.addEventListener('mozfullscreenchange', handleFullscreenChange)
-    
+
     // Keyboard shortcuts for custom fullscreen
     const handleKeyDown = (e) => {
       if (e.key === 'Escape' && isCustomFullscreen) {
@@ -323,10 +328,10 @@ const AnalyticsDashboard = () => {
         exitFullscreen()
       }
     }
-    
+
     document.addEventListener('keydown', handleKeyDown)
-    
-    
+
+
     return () => {
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
@@ -336,6 +341,30 @@ const AnalyticsDashboard = () => {
       document.removeEventListener('keydown', handleKeyDown)
     }
   }, [isFullscreen, isCustomFullscreen])
+
+  // Request fullscreen when overlay is shown
+  useEffect(() => {
+    const requestFullscreenOnOverlay = async () => {
+      if (isCustomFullscreen && fullscreenOverlayRef.current) {
+        try {
+          const element = fullscreenOverlayRef.current
+          if (element.requestFullscreen) {
+            await element.requestFullscreen()
+          } else if (element.webkitRequestFullscreen) {
+            await element.webkitRequestFullscreen()
+          } else if (element.mozRequestFullScreen) {
+            await element.mozRequestFullScreen()
+          } else if (element.msRequestFullscreen) {
+            await element.msRequestFullscreen()
+          }
+        } catch (error) {
+          console.error('Fullscreen request failed:', error)
+        }
+      }
+    }
+
+    requestFullscreenOnOverlay()
+  }, [isCustomFullscreen])
 
   const fetchDashboards = async (retryCount = 0) => {
     try {
@@ -609,17 +638,30 @@ const AnalyticsDashboard = () => {
     window.open(originalUrl, '_blank')
   }
 
-  // Custom fullscreen implementation
+  // Browser fullscreen implementation
   const handleCustomFullscreen = () => {
     if (isCustomFullscreen) {
       exitCustomFullscreen()
     } else {
+      // Set state to show overlay - useEffect will handle fullscreen request
       setIsCustomFullscreen(true)
       addToast('Press ESC to exit fullscreen', 'info')
     }
   }
 
   const exitCustomFullscreen = () => {
+    if (document.fullscreenElement || document.webkitFullscreenElement ||
+        document.mozFullScreenElement || document.msFullscreenElement) {
+      if (document.exitFullscreen) {
+        document.exitFullscreen()
+      } else if (document.webkitExitFullscreen) {
+        document.webkitExitFullscreen()
+      } else if (document.mozCancelFullScreen) {
+        document.mozCancelFullScreen()
+      } else if (document.msExitFullscreen) {
+        document.msExitFullscreen()
+      }
+    }
     setIsCustomFullscreen(false)
   }
 
@@ -801,7 +843,7 @@ const AnalyticsDashboard = () => {
     <>
       {/* Custom Fullscreen Overlay */}
       {isCustomFullscreen && activeDashboard && (
-        <div className="custom-fullscreen-overlay">
+        <div className="custom-fullscreen-overlay" ref={fullscreenOverlayRef}>
           <div className="custom-fullscreen-content">
             <DashboardViewer dashboard={activeDashboard} />
           </div>
